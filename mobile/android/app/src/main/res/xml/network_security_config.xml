@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Production: only HTTPS allowed (usesCleartextTraffic=false in manifest).
+  Add a <domain-config> here if you need to allow HTTP to a specific dev host.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+    Uncomment for local development against HTTP backend:
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+    </domain-config>
+    -->
+</network-security-config>

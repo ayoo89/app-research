@@ -1,0 +1,230 @@
+version: '3.9'
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  frontend:   {}
+  backend:    {}
+  monitoring: {}
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+  pgdata_replica:
+  esdata1:
+  esdata2:
+  redisdata:
+  grafana_data:
+  prometheus_data:
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  # ── Load Balancer ────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - '80:80'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    networks: [frontend, backend]
+    restart: unless-stopped
+
+  # ── API (stateless — scale with: docker compose up --scale api=3) ─
+  api:
+    build:
+      context: ./backend
+      target: production
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV:              production
+      DB_HOST:               postgres-primary
+      DB_REPLICA_HOST:       postgres-replica
+      REDIS_HOST:            redis
+      EMBEDDING_SERVICE_URL: http://embedding-service:8000
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      embedding-service:
+        condition: service_healthy
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:   { cpus: '1.0', memory: 512M }
+        reservations: { cpus: '0.25', memory: 256M }
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/api/v1/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── PostgreSQL Primary ────────────────────────────────────────────
+  postgres-primary:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB:       product_search
+    command: >
+      postgres
+        -c max_connections=200
+        -c shared_buffers=256MB
+        -c effective_cache_size=768MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=64MB
+        -c wal_level=replica
+        -c max_wal_senders=3
+        -c wal_keep_size=64
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL Read Replica ───────────────────────────────────────
+  postgres-replica:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB:       product_search
+      PGUSER:            postgres
+    volumes:
+      - pgdata_replica:/var/lib/postgresql/data
+    networks: [backend]
+    restart: unless-stopped
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+  # ── Redis (with persistence) ──────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+        --maxmemory 512mb
+        --maxmemory-policy allkeys-lru
+        --save 60 1000
+        --appendonly yes
+        --appendfsync everysec
+    volumes:
+      - redisdata:/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Elasticsearch Node 1 ──────────────────────────────────────────
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - node.name=es01
+      - cluster.name=product-search
+      - discovery.seed_hosts=es02
+      - cluster.initial_master_nodes=es01,es02
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    volumes:
+      - esdata1:/usr/share/elasticsearch/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:9200/_cluster/health | grep -v "red"']
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Elasticsearch Node 2 (replica) ───────────────────────────────
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - node.name=es02
+      - cluster.name=product-search
+      - discovery.seed_hosts=es01
+      - cluster.initial_master_nodes=es01,es02
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    volumes:
+      - esdata2:/usr/share/elasticsearch/data
+    networks: [backend]
+    restart: unless-stopped
+
+  # ── Embedding Service ─────────────────────────────────────────────
+  embedding-service:
+    build: ./embedding-service
+    environment:
+      ELASTICSEARCH_URL: http://es01:9200
+      REDIS_URL:         redis://redis:6379/1
+      ES_INDEX:          products
+      VECTOR_DIM:        '512'
+      MIN_SCORE:         '0.45'
+      KNN_NUM_CANDIDATES: '150'
+    depends_on:
+      es01:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:   { cpus: '2.0', memory: 2G }
+        reservations: { cpus: '0.5', memory: 1G }
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:8000/health']
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s  # model loading takes time
+
+  # ── Prometheus ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    ports:
+      - '9090:9090'
+    networks: [backend, monitoring]
+    restart: unless-stopped
+
+  # ── Grafana ───────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP:     'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '3001:3000'
+    depends_on: [prometheus]
+    networks: [monitoring]
+    restart: unless-stopped

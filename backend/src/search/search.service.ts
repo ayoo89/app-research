@@ -1,0 +1,372 @@
+import { Injectable, Logger, Inject } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import Redis from 'ioredis';
+import * as crypto from 'crypto';
+
+import { Product } from '../product/product.entity';
+import { EmbeddingService } from '../product/embedding.service';
+import { MetricsService } from '../common/metrics.service';
+import { REDIS_CLIENT } from './cache.module';
+import {
+  SearchRequest, SearchResponse, SearchResult,
+  MatchMethod, ScoringWeights, DEFAULT_WEIGHTS,
+} from './search.types';
+
+const CACHE_TTL_TEXT  = 300;    // 5 min
+const CACHE_TTL_EMBED = 3600;   // 1 hr
+const TOP_N           = 50;
+
+// Circuit breaker state for embedding service
+interface CircuitState {
+  failures: number;
+  openUntil: number;  // epoch ms; 0 = closed
+}
+
+@Injectable()
+export class SearchService {
+  private readonly logger = new Logger(SearchService.name);
+  private readonly circuit: CircuitState = { failures: 0, openUntil: 0 };
+  private readonly CIRCUIT_THRESHOLD = 5;   // open after 5 consecutive failures
+  private readonly CIRCUIT_RESET_MS  = 30_000; // try again after 30s
+
+  constructor(
+    @InjectRepository(Product) private productRepo: Repository<Product>,
+    private embeddingService: EmbeddingService,
+    private metrics: MetricsService,
+    @Inject(REDIS_CLIENT) private redis: Redis,
+  ) {}
+
+  // ─────────────────────────────────────────────────────────────────
+  // Public entry point
+  // ─────────────────────────────────────────────────────────────────
+
+  async search(req: SearchRequest, correlationId?: string): Promise<SearchResponse> {
+    const start   = Date.now();
+    const weights = { ...DEFAULT_WEIGHTS, ...req.weights };
+    const limit   = Math.min(req.limit ?? 20, 50);
+
+    // ── Cache check ───────────────────────────────────────────────
+    const cacheKey = this.buildCacheKey(req);
+    const cached   = await this.tryCache(cacheKey, req);
+    if (cached) {
+      this.metrics.increment('search_cache_hits_total');
+      this.metrics.observe('search_latency_ms', Date.now() - start, { cache: 'hit' });
+      return { ...cached, meta: { ...cached.meta, totalMs: Date.now() - start, cacheHit: true } };
+    }
+    this.metrics.increment('search_cache_misses_total');
+
+    // ── Pipeline ──────────────────────────────────────────────────
+    let results: SearchResult[] = [];
+    let methods: MatchMethod[]  = [];
+
+    try {
+      ({ results, methods } = await this.runPipeline(req, weights, limit));
+    } catch (err) {
+      this.logger.error(`Pipeline error [${correlationId}]: ${err.message}`);
+      this.metrics.increment('search_errors_total', { stage: 'pipeline' });
+      // Return empty rather than 500 — search should degrade gracefully
+      results = [];
+      methods = [];
+    }
+
+    const totalMs = Date.now() - start;
+    const response: SearchResponse = {
+      results,
+      meta: { totalMs, cacheHit: false, methods, correlationId },
+    };
+
+    // ── Cache write ───────────────────────────────────────────────
+    if (!req.imageBase64 && results.length > 0) {
+      this.redis.setex(cacheKey, CACHE_TTL_TEXT, JSON.stringify(response))
+        .catch((err) => this.logger.warn(`Cache write failed: ${err.message}`));
+    }
+
+    // ── Metrics ───────────────────────────────────────────────────
+    this.metrics.observe('search_latency_ms', totalMs, { cache: 'miss' });
+    this.metrics.increment('search_requests_total', { methods: methods.join('+') || 'none' });
+    if (totalMs > 1000) {
+      this.metrics.increment('search_slow_queries_total');
+      this.logger.warn(`Slow search ${totalMs}ms [${correlationId}] methods=${methods.join('+')}`);
+    }
+
+    this.logger.log(JSON.stringify({
+      event: 'search',
+      correlationId,
+      methods,
+      resultCount: results.length,
+      totalMs,
+      cacheHit: false,
+    }));
+
+    return response;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Pipeline — barcode → (text ∥ vector) → merge
+  // ─────────────────────────────────────────────────────────────────
+
+  private async runPipeline(
+    req: SearchRequest,
+    weights: ScoringWeights,
+    limit: number,
+  ): Promise<{ results: SearchResult[]; methods: MatchMethod[] }> {
+    const methods: MatchMethod[] = [];
+
+    // Step 1: Barcode — exact match, short-circuit immediately
+    if (req.barcode?.trim()) {
+      const t0 = Date.now();
+      const product = await this.productRepo.findOne({ where: { barcode: req.barcode.trim() } });
+      this.metrics.observe('search_barcode_latency_ms', Date.now() - t0);
+      if (product) {
+        methods.push('barcode');
+        this.metrics.increment('search_barcode_hits_total');
+        return { results: [this.toResult(product, weights.barcode, ['barcode'])], methods };
+      }
+      this.metrics.increment('search_barcode_misses_total');
+    }
+
+    // Steps 2 & 3: text + vector in parallel with independent timeouts
+    const [textResults, vectorResults] = await Promise.all([
+      req.text?.trim()
+        ? this.runTextSearch(req.text.trim(), limit, weights)
+        : Promise.resolve([]),
+      req.imageBase64
+        ? this.runVectorSearchWithFallback(req.imageBase64, req.text, limit, weights)
+        : Promise.resolve([]),
+    ]);
+
+    if (textResults.length)   methods.push('text');
+    if (vectorResults.length) methods.push('vector');
+
+    return { results: this.mergeAndRank([...textResults, ...vectorResults], weights, limit), methods };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Text Search
+  // ─────────────────────────────────────────────────────────────────
+
+  private async runTextSearch(
+    query: string,
+    limit: number,
+    weights: ScoringWeights,
+  ): Promise<SearchResult[]> {
+    const t0 = Date.now();
+    try {
+      const rows = await Promise.race([
+        this.productRepo.query(
+          `
+          WITH fts AS (
+            SELECT
+              p.id,
+              ts_rank_cd(
+                to_tsvector('english',
+                  p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
+                  COALESCE(p.description,'') || ' ' || COALESCE(p.category,'')
+                ),
+                websearch_to_tsquery('english', $1), 32
+              ) AS fts_rank,
+              GREATEST(
+                similarity(p.name, $1),
+                similarity(COALESCE(p.brand,''), $1)
+              ) AS trgm_score
+            FROM products p
+            WHERE
+              to_tsvector('english',
+                p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
+                COALESCE(p.description,'') || ' ' || COALESCE(p.category,'')
+              ) @@ websearch_to_tsquery('english', $1)
+              OR similarity(p.name, $1) > 0.2
+              OR similarity(COALESCE(p.brand,''), $1) > 0.25
+          )
+          SELECT
+            p.id, p.name, p.brand, p.barcode, p.category, p.images,
+            COALESCE(f.fts_rank, 0) * 0.7 + COALESCE(f.trgm_score, 0) * 0.3 AS combined_text_score
+          FROM products p
+          JOIN fts f ON f.id = p.id
+          ORDER BY combined_text_score DESC
+          LIMIT $2
+          `,
+          [query, limit],
+        ),
+        this.timeout(800, 'text-search'),
+      ]);
+
+      const ms = Date.now() - t0;
+      this.metrics.observe('search_text_latency_ms', ms);
+
+      return (rows as any[]).map((row) => {
+        const raw = Math.min(parseFloat(row.combined_text_score) || 0, 1);
+        return this.toResult(row, raw * weights.text, ['text'], { textScore: raw * weights.text, rawTextRank: raw });
+      });
+    } catch (err) {
+      this.logger.warn(`Text search failed (${Date.now() - t0}ms): ${err.message}`);
+      this.metrics.increment('search_errors_total', { stage: 'text' });
+      return [];
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Vector Search with circuit breaker + text fallback
+  // ─────────────────────────────────────────────────────────────────
+
+  private async runVectorSearchWithFallback(
+    imageBase64: string,
+    fallbackText: string | undefined,
+    limit: number,
+    weights: ScoringWeights,
+  ): Promise<SearchResult[]> {
+    // Circuit breaker — open?
+    if (this.circuit.openUntil > Date.now()) {
+      this.logger.warn('Embedding circuit open — skipping vector search');
+      this.metrics.increment('search_circuit_open_total');
+      // Fallback: use text search if we have text
+      if (fallbackText?.trim()) {
+        this.logger.log('Circuit fallback → text search');
+        return this.runTextSearch(fallbackText.trim(), limit, weights);
+      }
+      return [];
+    }
+
+    const t0 = Date.now();
+    try {
+      // Embedding cache
+      const imgHash      = crypto.createHash('sha256').update(imageBase64.slice(0, 2000)).digest('hex');
+      const embedCacheKey = `embed:img:${imgHash}`;
+      let embedding: number[];
+
+      const cachedEmbed = await this.redis.getBuffer(embedCacheKey);
+      if (cachedEmbed) {
+        const floats = new Float32Array(cachedEmbed.buffer, cachedEmbed.byteOffset, cachedEmbed.byteLength / 4);
+        embedding = Array.from(floats);
+        this.metrics.increment('embed_cache_hits_total');
+      } else {
+        embedding = await Promise.race([
+          this.embeddingService.generateImageEmbedding(imageBase64),
+          this.timeout(5000, 'embedding-generation'),
+        ]);
+        // Store as raw float32 bytes — 4× smaller than JSON
+        const buf = Buffer.from(new Float32Array(embedding).buffer);
+        this.redis.setex(embedCacheKey, CACHE_TTL_EMBED, buf).catch(() => {});
+        this.metrics.increment('embed_cache_misses_total');
+      }
+
+      const hits = await Promise.race([
+        this.embeddingService.vectorSearch(embedding, limit, 0.45),
+        this.timeout(2000, 'vector-search'),
+      ]);
+
+      this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
+      this.circuit.failures = 0; // reset on success
+
+      if (!hits.length) return [];
+
+      // Batch-fetch products in one query
+      const ids      = hits.map((h) => h.id);
+      const products = await this.productRepo.createQueryBuilder('p').whereInIds(ids).getMany();
+      const pMap     = new Map(products.map((p) => [p.id, p]));
+
+      return hits
+        .map((hit) => {
+          const p = pMap.get(hit.id);
+          return p ? this.toResult(p, hit.score * weights.vector, ['vector'], { vectorScore: hit.score }) : null;
+        })
+        .filter(Boolean) as SearchResult[];
+
+    } catch (err) {
+      const ms = Date.now() - t0;
+      this.logger.warn(`Vector search failed (${ms}ms): ${err.message}`);
+      this.metrics.increment('search_errors_total', { stage: 'vector' });
+
+      // Circuit breaker — trip after threshold
+      this.circuit.failures++;
+      if (this.circuit.failures >= this.CIRCUIT_THRESHOLD) {
+        this.circuit.openUntil = Date.now() + this.CIRCUIT_RESET_MS;
+        this.logger.error(`Embedding circuit OPENED — will retry in ${this.CIRCUIT_RESET_MS / 1000}s`);
+        this.metrics.increment('search_circuit_tripped_total');
+      }
+
+      // Fallback to text search
+      if (fallbackText?.trim()) {
+        this.logger.log('Vector failure fallback → text search');
+        return this.runTextSearch(fallbackText.trim(), limit, weights);
+      }
+      return [];
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Merge + Rank
+  // ─────────────────────────────────────────────────────────────────
+
+  private mergeAndRank(
+    results: SearchResult[],
+    weights: ScoringWeights,
+    limit: number,
+  ): SearchResult[] {
+    const seen = new Map<string, SearchResult>();
+
+    for (const r of results) {
+      if (!seen.has(r.id)) {
+        seen.set(r.id, { ...r });
+      } else {
+        const ex = seen.get(r.id)!;
+        ex.score     = Math.min(1.0, Math.max(ex.score, r.score) + weights.multiMatchBoost);
+        ex.matchedBy = [...new Set([...ex.matchedBy, ...r.matchedBy])];
+        if (r.debug) ex.debug = { ...ex.debug, ...r.debug };
+      }
+    }
+
+    return Array.from(seen.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.min(limit, TOP_N));
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────
+
+  private toResult(
+    product: any,
+    score: number,
+    matchedBy: MatchMethod[],
+    debug?: SearchResult['debug'],
+  ): SearchResult {
+    return {
+      id:       product.id,
+      name:     product.name,
+      brand:    product.brand    ?? null,
+      barcode:  product.barcode  ?? null,
+      category: product.category ?? null,
+      images:   product.images   ?? [],
+      score:    Math.round(score * 10000) / 10000,
+      matchedBy,
+      debug,
+    };
+  }
+
+  private async tryCache(key: string, req: SearchRequest): Promise<SearchResponse | null> {
+    if (req.imageBase64) return null;
+    try {
+      const raw = await this.redis.get(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
+  private buildCacheKey(req: SearchRequest): string {
+    const parts = [req.barcode?.trim() ?? '', req.text?.trim().toLowerCase() ?? '', req.limit ?? 20].join(':');
+    return `search:v3:${crypto.createHash('md5').update(parts).digest('hex')}`;
+  }
+
+  private timeout<T>(ms: number, label: string): Promise<T> {
+    return new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout: ${label} exceeded ${ms}ms`)), ms),
+    );
+  }
+
+  async invalidateProductCache(barcode?: string) {
+    if (barcode) {
+      await this.redis.del(this.buildCacheKey({ barcode })).catch(() => {});
+    }
+  }
+}

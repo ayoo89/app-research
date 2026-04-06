@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.gradle/
+
+# Android signing — NEVER commit
+mobile/android/app/release.keystore
+mobile/android/app/debug.keystore
+mobile/android/keystore.properties
+
+# Environment files
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+embedding-service/venv/
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# IDE
+.idea/
+*.iml
+
+# TypeScript
+*.tsbuildinfo

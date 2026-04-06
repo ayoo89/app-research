@@ -1,0 +1,72 @@
+{
+  "title": "Product Search — Overview",
+  "uid": "product-search-v1",
+  "schemaVersion": 38,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Requests / min",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "rate(search_requests_total[1m]) * 60", "legendFormat": "req/min" }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "p95 Latency (ms)",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "search_latency_ms{quantile=\"0.95\"}", "legendFormat": "p95" }],
+      "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 500 },
+        { "color": "red", "value": 1000 }
+      ]}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Cache Hit Rate",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "rate(search_cache_hits_total[5m]) / (rate(search_cache_hits_total[5m]) + rate(search_cache_misses_total[5m]))", "legendFormat": "hit rate" }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Error Rate",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "rate(search_errors_total[5m]) / rate(search_requests_total[5m])", "legendFormat": "error rate" }],
+      "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 0.01 },
+        { "color": "red", "value": 0.05 }
+      ]}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Search Latency Percentiles",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "search_latency_ms{quantile=\"0.5\"}", "legendFormat": "p50" },
+        { "expr": "search_latency_ms{quantile=\"0.95\"}", "legendFormat": "p95" },
+        { "expr": "search_latency_ms{quantile=\"0.99\"}", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Search by Method",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(search_requests_total[1m])", "legendFormat": "{{methods}}" }
+      ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Embedding Queue",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "embedding_queue_waiting", "legendFormat": "waiting" },
+        { "expr": "embedding_queue_active", "legendFormat": "active" },
+        { "expr": "embedding_queue_failed", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Circuit Breaker Events",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "increase(search_circuit_tripped_total[5m])", "legendFormat": "trips" },
+        { "expr": "increase(search_circuit_open_total[5m])", "legendFormat": "blocked requests" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { Product } from './product.entity';
+import { SearchService } from '../search/search.service';
+
+@Injectable()
+export class ProductService {
+  constructor(
+    @InjectRepository(Product) private repo: Repository<Product>,
+    @InjectQueue('embedding') private embeddingQueue: Queue,
+    @Inject(forwardRef(() => SearchService)) private searchService: SearchService,
+  ) {}
+
+  findAll(page = 1, limit = 20) {
+    return this.repo.findAndCount({
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  findById(id: string) {
+    return this.repo.findOne({ where: { id } });
+  }
+
+  findByBarcode(barcode: string) {
+    return this.repo.findOne({ where: { barcode } });
+  }
+
+  /**
+   * Full-text + trigram search.
+   * Moved to raw SQL in SearchService for full control over ranking.
+   * Kept here as a lightweight fallback for internal use.
+   */
+  textSearch(query: string, limit = 20) {
+    return this.repo.query(
+      `
+      SELECT p.*,
+        ts_rank_cd(
+          to_tsvector('english', p.name || ' ' || COALESCE(p.brand,'') || ' ' || COALESCE(p.description,'')),
+          websearch_to_tsquery('english', $1), 32
+        ) AS fts_rank
+      FROM products p
+      WHERE
+        to_tsvector('english', p.name || ' ' || COALESCE(p.brand,'') || ' ' || COALESCE(p.description,''))
+          @@ websearch_to_tsquery('english', $1)
+        OR similarity(p.name, $1) > 0.2
+      ORDER BY fts_rank DESC, similarity(p.name, $1) DESC
+      LIMIT $2
+      `,
+      [query, limit],
+    );
+  }
+
+  async create(data: Partial<Product>) {
+    const product = this.repo.create(data);
+    const saved = await this.repo.save(product);
+    await this.embeddingQueue.add('generate', { productId: saved.id });
+    return saved;
+  }
+
+  async update(id: string, data: Partial<Product>) {
+    const product = await this.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+    Object.assign(product, data);
+    const saved = await this.repo.save(product);
+    if (data.name || data.description || data.images) {
+      await this.embeddingQueue.add('generate', { productId: saved.id });
+    }
+    // Invalidate search cache for this product's barcode
+    await this.searchService.invalidateProductCache(saved.barcode ?? undefined);
+    return saved;
+  }
+
+  async remove(id: string) {
+    const product = await this.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+    await this.searchService.invalidateProductCache(product.barcode ?? undefined);
+    await this.repo.remove(product);
+  }
+
+  async saveEmbedding(id: string, vector: number[]) {
+    await this.repo.update(id, { embeddingVector: vector, embeddingGenerated: true });
+  }
+
+  async triggerEmbedding(id: string) {
+    await this.embeddingQueue.add('generate', { productId: id });
+  }
+
+  async bulkCreate(products: Partial<Product>[]) {
+    const saved = await this.repo.save(this.repo.create(products as Product[]));
+    for (const p of saved) {
+      await this.embeddingQueue.add('generate', { productId: p.id });
+    }
+    return saved;
+  }
+}

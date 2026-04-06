@@ -1,0 +1,32 @@
+# JS
+node_modules/
+.expo/
+dist/
+build/
+.env
+.env.local
+
+# Android — NEVER commit signing credentials
+android/app/release.keystore
+android/app/debug.keystore
+android/keystore.properties
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+
+# iOS
+ios/Pods/
+ios/build/
+*.xcworkspace
+*.xcuserstate
+
+# Metro
+.metro-health-check*
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db

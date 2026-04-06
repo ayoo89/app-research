@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-service
+  labels:
+    app: embedding-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: embedding-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: embedding-service
+    spec:
+      terminationGracePeriodSeconds: 60  # allow in-flight embeddings to finish
+      containers:
+        - name: embedding
+          image: product-search-embedding:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ELASTICSEARCH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: product-search-secrets
+                  key: ELASTICSEARCH_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: product-search-secrets
+                  key: REDIS_URL
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: 2000m, memory: 2Gi }
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60   # model loading
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 90
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-service
+spec:
+  selector:
+    app: embedding-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: embedding-service-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: embedding-service
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
