@@ -52,11 +52,20 @@ jobs:
         working-directory: mobile/android
         run: chmod +x gradlew
 
-      - name: Build release APK
+      - name: Build release APK (includes JS bundle via Gradle task)
         working-directory: mobile/android
         env:
           API_BASE_URL: ${{ github.event.inputs.api_url }}
+          # Make sure node/npx are on PATH for the bundleReleaseJs Gradle task
+          PATH: ${{ env.PATH }}:/usr/local/bin
         run: ./gradlew assembleRelease -PAPI_BASE_URL="$API_BASE_URL" --no-daemon
+
+      - name: Verify bundle was created
+        run: |
+          echo "=== APK files ==="
+          find mobile/android/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
+          echo "=== JS Bundle ==="
+          find mobile/android/app/src/main/assets -name "*.bundle" -exec ls -lh {} \; 2>/dev/null || echo "Bundle in APK assets"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

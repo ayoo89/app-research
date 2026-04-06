@@ -1,17 +1,40 @@
 apply plugin: "com.android.application"
 
-// Load keystore credentials
+// ── Keystore ──────────────────────────────────────────────────────────────────
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
-
 def getKeystoreProp = { key ->
     return keystoreProperties.getProperty(key)
         ?: System.getenv(key)
         ?: project.findProperty(key)
         ?: ""
+}
+
+// ── JS Bundle task (replaces React Native Gradle plugin) ─────────────────────
+// Bundles index.js → assets/index.android.bundle using Metro
+task bundleReleaseJs(type: Exec) {
+    def nodeModules = new File(projectDir, "../../node_modules")
+    def metroConfig  = new File(projectDir, "../../metro.config.js")
+    def entryFile    = new File(projectDir, "../../index.js")
+    def bundleDir    = new File(projectDir, "src/main/assets")
+    def bundleFile   = new File(bundleDir, "index.android.bundle")
+    def resDir       = new File(projectDir, "src/main/res")
+
+    bundleDir.mkdirs()
+
+    commandLine "node",
+        "${nodeModules}/.bin/react-native",
+        "bundle",
+        "--platform", "android",
+        "--dev", "false",
+        "--entry-file", entryFile.absolutePath,
+        "--bundle-output", bundleFile.absolutePath,
+        "--assets-dest", resDir.absolutePath,
+        "--config", metroConfig.absolutePath,
+        "--reset-cache"
 }
 
 android {
@@ -62,6 +85,13 @@ android {
     packagingOptions {
         pickFirst '**/libc++_shared.so'
         pickFirst '**/libfbjni.so'
+    }
+
+    // Ensure JS bundle is created before merging assets
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release") {
+            variant.mergeAssetsProvider.get().dependsOn(bundleReleaseJs)
+        }
     }
 }
 
