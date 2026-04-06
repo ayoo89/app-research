@@ -1,88 +1,52 @@
 apply plugin: "com.android.application"
-apply plugin: "com.facebook.react"
-apply plugin: "kotlin-android"
 
-// Load keystore credentials from keystore.properties (not committed to git)
-// Falls back to gradle.properties / environment variables
+// Load keystore credentials
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
-def getKeystoreProperty = { key ->
+def getKeystoreProp = { key ->
     return keystoreProperties.getProperty(key)
         ?: System.getenv(key)
         ?: project.findProperty(key)
         ?: ""
 }
 
-react {
-    /* Hermes JS engine — smaller bundle, faster startup */
-    hermesEnabled = true
-}
-
 android {
-    ndkVersion rootProject.ext.ndkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
-
+    compileSdkVersion 34
+    buildToolsVersion "34.0.0"
     namespace "com.productsearch.app"
 
     defaultConfig {
         applicationId "com.productsearch.app"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        minSdkVersion 24
+        targetSdkVersion 34
         versionCode 1
         versionName "1.0.0"
 
-        // Inject API URL at build time — override with -PAPI_BASE_URL=https://... 
         def apiBaseUrl = project.findProperty("API_BASE_URL")
             ?: System.getenv("API_BASE_URL")
             ?: "https://api.yourdomain.com/api/v1"
         buildConfigField "String", "API_BASE_URL", "\"${apiBaseUrl}\""
-
-        // ABI splits — produce per-architecture APKs for smaller size
-        splits {
-            abi {
-                reset()
-                enable true
-                universalApk true   // also produce a fat universal APK
-                include "arm64-v8a", "armeabi-v7a", "x86_64"
-            }
-        }
     }
 
     signingConfigs {
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
-        }
         release {
-            storeFile file(getKeystoreProperty("MYAPP_UPLOAD_STORE_FILE") ?: "release.keystore")
-            storePassword getKeystoreProperty("MYAPP_UPLOAD_STORE_PASSWORD")
-            keyAlias getKeystoreProperty("MYAPP_UPLOAD_KEY_ALIAS")
-            keyPassword getKeystoreProperty("MYAPP_UPLOAD_KEY_PASSWORD")
+            storeFile     file(getKeystoreProp("MYAPP_UPLOAD_STORE_FILE") ?: "release.keystore")
+            storePassword getKeystoreProp("MYAPP_UPLOAD_STORE_PASSWORD")
+            keyAlias      getKeystoreProp("MYAPP_UPLOAD_KEY_ALIAS")
+            keyPassword   getKeystoreProp("MYAPP_UPLOAD_KEY_PASSWORD")
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig signingConfigs.debug
-            applicationIdSuffix ".debug"
-            resValue "string", "app_name", "ProductSearch (Dev)"
-        }
         release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
+            signingConfig   signingConfigs.release
+            minifyEnabled   false
+            shrinkResources false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
-            resValue "string", "app_name", "ProductSearch"
-
-            // Strip debug logs in release
-            buildConfigField "boolean", "DEBUG_LOGS", "false"
         }
     }
 
@@ -95,21 +59,18 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     packagingOptions {
         pickFirst '**/libc++_shared.so'
         pickFirst '**/libfbjni.so'
     }
 }
 
-dependencies {
-    // React Native
-    implementation("com.facebook.react:react-android")
-    implementation("com.facebook.react:hermes-android")
+repositories {
+    google()
+    mavenCentral()
+}
 
-    // Kotlin
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.ext.kotlinVersion"
+dependencies {
+    implementation "com.facebook.react:react-android:0.73.0"
+    implementation "com.facebook.react:hermes-android:0.73.0"
 }

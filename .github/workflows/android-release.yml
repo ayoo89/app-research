@@ -22,7 +22,6 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -33,7 +32,7 @@ jobs:
         working-directory: mobile
         run: npm install --legacy-peer-deps
 
-      - name: Restore keystore from secret
+      - name: Restore keystore
         working-directory: mobile/android/app
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -46,12 +45,8 @@ jobs:
           KEY_PASSWORD:   ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS:      ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          cat > keystore.properties <<EOF
-          MYAPP_UPLOAD_STORE_FILE=release.keystore
-          MYAPP_UPLOAD_KEY_ALIAS=${KEY_ALIAS}
-          MYAPP_UPLOAD_STORE_PASSWORD=${STORE_PASSWORD}
-          MYAPP_UPLOAD_KEY_PASSWORD=${KEY_PASSWORD}
-          EOF
+          printf 'MYAPP_UPLOAD_STORE_FILE=release.keystore\nMYAPP_UPLOAD_KEY_ALIAS=%s\nMYAPP_UPLOAD_STORE_PASSWORD=%s\nMYAPP_UPLOAD_KEY_PASSWORD=%s\n' \
+            "$KEY_ALIAS" "$STORE_PASSWORD" "$KEY_PASSWORD" > keystore.properties
 
       - name: Make gradlew executable
         working-directory: mobile/android
@@ -61,18 +56,9 @@ jobs:
         working-directory: mobile/android
         env:
           API_BASE_URL: ${{ github.event.inputs.api_url }}
-        run: |
-          # Ensure node_modules are available for Gradle plugin resolution
-          cd .. && npm install --legacy-peer-deps && cd android
-          ./gradlew assembleRelease \
-            -PAPI_BASE_URL="$API_BASE_URL" \
-            --no-daemon \
-            --stacktrace
+        run: ./gradlew assembleRelease -PAPI_BASE_URL="$API_BASE_URL" --no-daemon
 
-      - name: List APK outputs
-        run: find mobile/android/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
-
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
