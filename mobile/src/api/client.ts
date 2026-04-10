@@ -23,8 +23,9 @@ function resolveBaseUrl(): string {
   if (process.env.API_URL) return process.env.API_URL;
 
   // Dev fallback: Android emulator uses 10.0.2.2, iOS simulator uses localhost
+  // Physical device: use your machine's local IP
   return Platform.OS === 'android'
-    ? 'http://10.0.2.2:3000/api/v1'
+    ? 'http://192.168.1.227:3000/api/v1'
     : 'http://localhost:3000/api/v1';
 }
 

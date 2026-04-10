@@ -1,18 +1,23 @@
 {
   "cli": {
-    "version": ">= 5.9.3"
+    "version": ">= 5.9.3",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
+      "node": "24.14.1",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "node": "24.14.1",
       "android": {
         "buildType": "apk"
       }
     },
-    "production": {}
+    "production": {
+      "node": "24.14.1"
+    }
   },
   "submit": {
     "production": {}
