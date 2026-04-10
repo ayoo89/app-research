@@ -1,0 +1,12 @@
+# Copy this to local.properties (not committed to git)
+# Tell Android Studio / Gradle where to find Node.js
+# Find your Node path with: where node  (Windows) or which node (Mac/Linux)
+
+# Windows example:
+# nodejs.dir=C:\\Program Files\\nodejs
+
+# Mac example:
+# nodejs.dir=/usr/local/bin
+
+# The sdk.dir is set automatically by Android Studio:
+# sdk.dir=C\:\\Users\\YourName\\AppData\\Local\\Android\\Sdk
