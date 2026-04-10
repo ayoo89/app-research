@@ -13,28 +13,98 @@ def getKeystoreProp = { key ->
         ?: ""
 }
 
-// ── JS Bundle task (replaces React Native Gradle plugin) ─────────────────────
-// Bundles index.js → assets/index.android.bundle using Metro
+// ── Node.js auto-detection ────────────────────────────────────────────────────
+// Android Studio on Windows doesn't inherit system PATH.
+// We try multiple known locations in order.
+def findNodeExecutable = {
+    // 1. Explicit override in local.properties: nodejs.dir=C:\\Program Files\\nodejs
+    def localProps = new Properties()
+    def localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) {
+        localProps.load(new FileInputStream(localPropsFile))
+    }
+    def nodeDir = localProps.getProperty("nodejs.dir")
+    if (nodeDir) {
+        def nodeExe = new File(nodeDir, "node.exe")
+        if (nodeExe.exists()) return nodeExe.absolutePath
+        def nodeUnix = new File(nodeDir, "node")
+        if (nodeUnix.exists()) return nodeUnix.absolutePath
+    }
+
+    // 2. Environment variable NODE_HOME
+    def nodeHome = System.getenv("NODE_HOME")
+    if (nodeHome) {
+        def nodeExe = new File(nodeHome, "node.exe")
+        if (nodeExe.exists()) return nodeExe.absolutePath
+    }
+
+    // 3. Common Windows install paths
+    def windowsPaths = [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Program Files (x86)\\nodejs\\node.exe",
+        "${System.getenv('APPDATA')}\\nvm\\current\\node.exe",
+        "${System.getenv('LOCALAPPDATA')}\\Programs\\nodejs\\node.exe",
+    ]
+    for (path in windowsPaths) {
+        if (path && new File(path).exists()) return path
+    }
+
+    // 4. Common Unix/Mac paths
+    def unixPaths = ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node"]
+    for (path in unixPaths) {
+        if (new File(path).exists()) return path
+    }
+
+    // 5. Fallback — hope it's on PATH (works in CI and terminal builds)
+    return "node"
+}
+
+def nodeExecutable = findNodeExecutable()
+logger.lifecycle("Using Node.js: ${nodeExecutable}")
+
+// ── JS Bundle task ────────────────────────────────────────────────────────────
 task bundleReleaseJs(type: Exec) {
-    def nodeModules = new File(projectDir, "../../node_modules")
-    def metroConfig  = new File(projectDir, "../../metro.config.js")
-    def entryFile    = new File(projectDir, "../../index.js")
-    def bundleDir    = new File(projectDir, "src/main/assets")
-    def bundleFile   = new File(bundleDir, "index.android.bundle")
-    def resDir       = new File(projectDir, "src/main/res")
+    def projectRoot = new File(projectDir, "../..").canonicalFile
+    def nodeModules = new File(projectRoot, "node_modules")
+    def bundleDir   = new File(projectDir, "src/main/assets")
+    def bundleFile  = new File(bundleDir, "index.android.bundle")
+    def resDir      = new File(projectDir, "src/main/res")
 
     bundleDir.mkdirs()
 
-    commandLine "node",
-        "${nodeModules}/.bin/react-native",
-        "bundle",
-        "--platform", "android",
-        "--dev", "false",
-        "--entry-file", entryFile.absolutePath,
-        "--bundle-output", bundleFile.absolutePath,
-        "--assets-dest", resDir.absolutePath,
-        "--config", metroConfig.absolutePath,
-        "--reset-cache"
+    // Use the react-native CLI from node_modules (avoids global install issues)
+    def rnCli = new File(nodeModules, ".bin/react-native")
+    // On Windows the CLI is react-native.cmd
+    def rnCliCmd = new File(nodeModules, ".bin/react-native.cmd")
+
+    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+
+    if (isWindows && rnCliCmd.exists()) {
+        // Windows: use cmd.exe to run the .cmd script
+        commandLine "cmd", "/c",
+            rnCliCmd.absolutePath,
+            "bundle",
+            "--platform", "android",
+            "--dev", "false",
+            "--entry-file", new File(projectRoot, "index.js").absolutePath,
+            "--bundle-output", bundleFile.absolutePath,
+            "--assets-dest", resDir.absolutePath,
+            "--reset-cache"
+    } else {
+        // Unix / CI
+        commandLine nodeExecutable,
+            rnCli.absolutePath,
+            "bundle",
+            "--platform", "android",
+            "--dev", "false",
+            "--entry-file", new File(projectRoot, "index.js").absolutePath,
+            "--bundle-output", bundleFile.absolutePath,
+            "--assets-dest", resDir.absolutePath,
+            "--reset-cache"
+    }
+
+    // Run from project root so Metro can find node_modules
+    workingDir projectRoot
 }
 
 android {
@@ -65,6 +135,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+        }
         release {
             signingConfig   signingConfigs.release
             minifyEnabled   false
@@ -83,11 +156,12 @@ android {
     }
 
     packagingOptions {
-        pickFirst '**/libc++_shared.so'
-        pickFirst '**/libfbjni.so'
+        jniLibs {
+            pickFirsts += ['**/libc++_shared.so', '**/libfbjni.so']
+        }
     }
 
-    // Ensure JS bundle is created before merging assets
+    // Wire JS bundle into release build only
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
             variant.mergeAssetsProvider.get().dependsOn(bundleReleaseJs)
