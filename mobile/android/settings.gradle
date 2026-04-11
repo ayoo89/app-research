@@ -8,3 +8,8 @@ pluginManagement {
 
 rootProject.name = 'ProductSearchApp'
 include ':app'
+
+// NOTE: native_modules.gradle intentionally NOT applied here.
+// It auto-includes all RN packages as subprojects, which breaks with AGP 8.3
+// because older packages (react-native-fast-image etc.) don't have 'namespace'.
+// Native modules are handled via emptyList() in MainApplication.kt.
