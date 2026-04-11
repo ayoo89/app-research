@@ -1,37 +1,20 @@
 pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
+
 plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+    id("com.facebook.react.settings")
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand()
 }
 
 rootProject.name = 'ProductSearchApp'
 include ':app'
-
-// ── React Native package includes ─────────────────────────────────────────────
-def nodeModulesDir = new File(rootDir, "../node_modules")
-
-// Helper: include a package's android dir as a subproject with a clean name
-def includeRNPackage = { String packageName, String projectName ->
-    def dir = new File(nodeModulesDir, "${packageName}/android")
-    if (dir.exists()) {
-        include ":${projectName}"
-        project(":${projectName}").projectDir = dir
-    }
-}
-
-includeRNPackage("react-native-gesture-handler",          "rn-gesture-handler")
-includeRNPackage("react-native-reanimated",               "rn-reanimated")
-includeRNPackage("react-native-screens",                  "rn-screens")
-includeRNPackage("react-native-safe-area-context",        "rn-safe-area-context")
-includeRNPackage("react-native-fast-image",               "rn-fast-image")
-includeRNPackage("react-native-image-picker",             "rn-image-picker")
-includeRNPackage("@react-native-async-storage/async-storage", "rn-async-storage")
-includeRNPackage("@react-native-community/netinfo",       "rn-netinfo")
-includeRNPackage("react-native-fs",                       "rn-fs")
-includeRNPackage("react-native-vision-camera",            "rn-vision-camera")
-includeRNPackage("react-native-haptic-feedback",          "rn-haptic-feedback")
+includeBuild('../node_modules/@react-native/gradle-plugin')

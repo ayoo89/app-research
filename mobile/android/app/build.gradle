@@ -1,4 +1,5 @@
 apply plugin: "com.android.application"
+apply plugin: "com.facebook.react"
 apply plugin: "kotlin-android"
 
 // ── Keystore ──────────────────────────────────────────────────────────────────
@@ -28,71 +29,31 @@ def findNodeExecutable = {
         def nodeUnix = new File(nodeDir, "node")
         if (nodeUnix.exists()) return nodeUnix.absolutePath
     }
-
-    def nodeHome = System.getenv("NODE_HOME")
-    if (nodeHome) {
-        def nodeExe = new File(nodeHome, "node.exe")
-        if (nodeExe.exists()) return nodeExe.absolutePath
-    }
-
     def windowsPaths = [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Program Files (x86)\\nodejs\\node.exe",
-        "${System.getenv('APPDATA')}\\nvm\\current\\node.exe",
-        "${System.getenv('LOCALAPPDATA')}\\Programs\\nodejs\\node.exe",
     ]
     for (path in windowsPaths) {
         if (path && new File(path).exists()) return path
     }
-
     def unixPaths = ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node"]
     for (path in unixPaths) {
         if (new File(path).exists()) return path
     }
-
     return "node"
 }
 
 def nodeExecutable = findNodeExecutable()
 logger.lifecycle("Using Node.js: ${nodeExecutable}")
 
-// ── JS Bundle task ────────────────────────────────────────────────────────────
-task bundleReleaseJs(type: Exec) {
-    def projectRoot = new File(projectDir, "../..").canonicalFile
-    def nodeModules = new File(projectRoot, "node_modules")
-    def bundleDir   = new File(projectDir, "src/main/assets")
-    def bundleFile  = new File(bundleDir, "index.android.bundle")
-    def resDir      = new File(projectDir, "src/main/res")
-
-    bundleDir.mkdirs()
-
-    def rnCli    = new File(nodeModules, ".bin/react-native")
-    def rnCliCmd = new File(nodeModules, ".bin/react-native.cmd")
-    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
-
-    if (isWindows && rnCliCmd.exists()) {
-        commandLine = ["cmd", "/c",
-            rnCliCmd.absolutePath,
-            "bundle",
-            "--platform", "android",
-            "--dev", "false",
-            "--entry-file", new File(projectRoot, "index.js").absolutePath,
-            "--bundle-output", bundleFile.absolutePath,
-            "--assets-dest", resDir.absolutePath,
-            "--reset-cache"]
-    } else {
-        commandLine = [nodeExecutable,
-            rnCli.absolutePath,
-            "bundle",
-            "--platform", "android",
-            "--dev", "false",
-            "--entry-file", new File(projectRoot, "index.js").absolutePath,
-            "--bundle-output", bundleFile.absolutePath,
-            "--assets-dest", resDir.absolutePath,
-            "--reset-cache"]
-    }
-
-    workingDir = projectRoot
+// ── React Native Gradle Plugin config ────────────────────────────────────────
+react {
+    // The RN Gradle plugin handles JS bundling and auto-linking
+    hermesEnabled = true
+    entryFile = file("../../index.js")
+    bundleAssetName = "index.android.bundle"
+    bundleCommand = "bundle"
+    extraPackagerArgs = []
 }
 
 android {
@@ -156,15 +117,7 @@ android {
     packagingOptions {
         jniLibs {
             pickFirsts += ['**/libc++_shared.so', '**/libfbjni.so']
-            // Extract native libs so the OS can load them directly from disk
-            // Required for 16KB page size compatibility on Android 15+
             useLegacyPackaging = true
-        }
-    }
-
-    applicationVariants.all { variant ->
-        if (variant.buildType.name == "release") {
-            variant.mergeAssetsProvider.get().dependsOn(bundleReleaseJs)
         }
     }
 }
@@ -175,20 +128,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.facebook.react:react-android:0.73.0")
-    implementation("com.facebook.react:hermes-android:0.73.0")
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
-
-    // Native module packages — included as subprojects from node_modules
-    implementation(project(":rn-gesture-handler"))
-    implementation(project(":rn-reanimated"))
-    implementation(project(":rn-screens"))
-    implementation(project(":rn-safe-area-context"))
-    implementation(project(":rn-fast-image"))
-    implementation(project(":rn-image-picker"))
-    implementation(project(":rn-async-storage"))
-    implementation(project(":rn-netinfo"))
-    implementation(project(":rn-fs"))
-    implementation(project(":rn-vision-camera"))
-    implementation(project(":rn-haptic-feedback"))
 }

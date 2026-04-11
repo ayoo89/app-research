@@ -11,8 +11,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // AGP 8.3.x requires Gradle 8.4+ — compatible with gradle-8.6
         classpath("com.android.tools.build:gradle:8.3.2")
+        classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
     }
 }
