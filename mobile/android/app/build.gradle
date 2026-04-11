@@ -145,6 +145,9 @@ android {
     packagingOptions {
         jniLibs {
             pickFirsts += ['**/libc++_shared.so', '**/libfbjni.so']
+            // Extract native libs so the OS can load them directly from disk
+            // Required for 16KB page size compatibility on Android 15+
+            useLegacyPackaging = true
         }
     }
 
