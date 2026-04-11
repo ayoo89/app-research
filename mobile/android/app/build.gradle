@@ -1,6 +1,10 @@
 apply plugin: "com.android.application"
 apply plugin: "kotlin-android"
 
+// NOTE: 'com.facebook.react' plugin intentionally NOT applied here.
+// It requires node_modules to be present at Gradle config time, which
+// breaks Android Studio sync. JS bundling is handled by bundleReleaseJs task.
+
 // ── Keystore ──────────────────────────────────────────────────────────────────
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
