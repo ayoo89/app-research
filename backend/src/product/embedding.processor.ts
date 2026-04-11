@@ -29,8 +29,16 @@ export class EmbeddingProcessor {
       return { skipped: true };
     }
 
-    const text = [product.name, product.brand, product.description, product.category]
-      .filter(Boolean).join(' ');
+    const text = [
+      product.name,
+      product.brand,
+      product.description,
+      product.category,
+      product.family,
+      product.subcategory,
+      product.barcode,
+      product.codeGold,
+    ].filter(Boolean).join(' ');
 
     const firstImage = product.images?.[0];
     let embedding: number[];
@@ -62,10 +70,13 @@ export class EmbeddingProcessor {
     });
 
     await this.embeddingService.indexProduct(productId, embedding, {
-      name:     product.name,
-      brand:    product.brand    ?? '',
-      category: product.category ?? '',
-      barcode:  product.barcode  ?? '',
+      name:          product.name,
+      brand:         product.brand         ?? '',
+      category:      product.category      ?? '',
+      family:        product.family        ?? '',
+      subcategory:   product.subcategory   ?? '',
+      barcode:       product.barcode       ?? '',
+      code_gold:     product.codeGold      ?? '',
     });
 
     const ms = Date.now() - t0;

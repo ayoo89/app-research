@@ -6,7 +6,7 @@ import { Queue } from 'bull';
 import { Product } from '../product/product.entity';
 
 // Bump this when the embedding model changes — triggers automatic re-indexing
-export const EMBEDDING_VERSION = 2;
+export const EMBEDDING_VERSION = 3;
 
 @Injectable()
 export class ReindexService {

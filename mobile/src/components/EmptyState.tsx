@@ -14,7 +14,9 @@ interface Props {
 export default function EmptyState({ icon, title, subtitle, actionLabel, onAction }: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>{icon}</Text>
+      <View style={styles.iconWrap}>
+        <Text style={styles.icon}>{icon}</Text>
+      </View>
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       {actionLabel && onAction ? (
@@ -33,9 +35,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: spacing.xxxl, paddingVertical: spacing.xxxl * 2,
+    maxWidth: 400,
+    alignSelf: 'center',
+    width: '100%',
   },
-  icon:     { fontSize: 52, marginBottom: spacing.lg },
+  iconWrap: {
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  icon:     { fontSize: 40 },
   title:    { ...typography.h3, textAlign: 'center', marginBottom: spacing.sm },
-  subtitle: { ...typography.small, textAlign: 'center', lineHeight: 20, color: colors.textMuted },
-  btn:      { marginTop: spacing.xl },
+  subtitle: { ...typography.small, textAlign: 'center', color: colors.textMuted },
+  btn:      { marginTop: spacing.xl, minWidth: 200 },
 });

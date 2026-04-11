@@ -1,3 +1,15 @@
+/**
+ * Filtres optionnels (alignés export ERP) :
+ * - category ≈ CATEGORIE
+ * - family ≈ Famille
+ * - subcategory ≈ Sous-Famille
+ */
+export interface ProductSearchFilters {
+  category?: string;
+  subcategory?: string;
+  family?: string;
+}
+
 export interface SearchRequest {
   barcode?: string;
   text?: string;
@@ -6,6 +18,8 @@ export interface SearchRequest {
   limit?: number;
   /** Override default scoring weights */
   weights?: Partial<ScoringWeights>;
+  /** Catégorie, sous-famille, famille — restreignent les résultats. */
+  filters?: ProductSearchFilters;
 }
 
 export interface ScoringWeights {
@@ -26,8 +40,14 @@ export interface SearchResult {
   id: string;
   name: string;
   brand: string | null;
+  /** CODE GOLD ou équivalent ERP */
+  codeGold: string | null;
   barcode: string | null;
   category: string | null;
+  /** Sous-famille ERP */
+  subcategory: string | null;
+  /** Famille ERP */
+  family: string | null;
   images: string[];
   score: number;           // normalised 0–1
   matchedBy: MatchMethod[];

@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import Redis from 'ioredis';
 import * as crypto from 'crypto';
 
@@ -11,11 +11,13 @@ import { REDIS_CLIENT } from './cache.module';
 import {
   SearchRequest, SearchResponse, SearchResult,
   MatchMethod, ScoringWeights, DEFAULT_WEIGHTS,
+  ProductSearchFilters,
 } from './search.types';
 
 const CACHE_TTL_TEXT  = 300;    // 5 min
 const CACHE_TTL_EMBED = 3600;   // 1 hr
 const TOP_N           = 50;
+const MAX_SCAN_PAYLOAD = 2048;
 
 // Circuit breaker state for embedding service
 interface CircuitState {
@@ -113,10 +115,10 @@ export class SearchService {
   ): Promise<{ results: SearchResult[]; methods: MatchMethod[] }> {
     const methods: MatchMethod[] = [];
 
-    // Step 1: Barcode — exact match, short-circuit immediately
+    // Step 1: Code-barres, QR (URL / GTIN), ou UUID produit — match prioritaire
     if (req.barcode?.trim()) {
       const t0 = Date.now();
-      const product = await this.productRepo.findOne({ where: { barcode: req.barcode.trim() } });
+      const product = await this.resolveScanProduct(req.barcode.trim(), req.filters);
       this.metrics.observe('search_barcode_latency_ms', Date.now() - t0);
       if (product) {
         methods.push('barcode');
@@ -129,10 +131,10 @@ export class SearchService {
     // Steps 2 & 3: text + vector in parallel with independent timeouts
     const [textResults, vectorResults] = await Promise.all([
       req.text?.trim()
-        ? this.runTextSearch(req.text.trim(), limit, weights)
+        ? this.runTextSearch(req.text.trim(), limit, weights, req.filters)
         : Promise.resolve([]),
       req.imageBase64
-        ? this.runVectorSearchWithFallback(req.imageBase64, req.text, limit, weights)
+        ? this.runVectorSearchWithFallback(req.imageBase64, req.text, limit, weights, req.filters)
         : Promise.resolve([]),
     ]);
 
@@ -150,8 +152,12 @@ export class SearchService {
     query: string,
     limit: number,
     weights: ScoringWeights,
+    filters?: ProductSearchFilters,
   ): Promise<SearchResult[]> {
     const t0 = Date.now();
+    const fc = filters?.category?.trim().toLowerCase() ?? null;
+    const fs = filters?.subcategory?.trim().toLowerCase() ?? null;
+    const ff = filters?.family?.trim().toLowerCase() ?? null;
     try {
       const rows = await Promise.race([
         this.productRepo.query(
@@ -162,32 +168,45 @@ export class SearchService {
               ts_rank_cd(
                 to_tsvector('english',
                   p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
-                  COALESCE(p.description,'') || ' ' || COALESCE(p.category,'')
+                  COALESCE(p.description,'') || ' ' || COALESCE(p.category,'') || ' ' ||
+                  COALESCE(p.family,'') || ' ' || COALESCE(p.subcategory,'') || ' ' ||
+                  COALESCE(p.barcode,'') || ' ' || COALESCE(p."codeGold",'')
                 ),
                 websearch_to_tsquery('english', $1), 32
               ) AS fts_rank,
               GREATEST(
                 similarity(p.name, $1),
-                similarity(COALESCE(p.brand,''), $1)
+                similarity(COALESCE(p.brand,''), $1),
+                similarity(COALESCE(p.barcode,''), $1),
+                similarity(COALESCE(p."codeGold",''), $1)
               ) AS trgm_score
             FROM products p
             WHERE
-              to_tsvector('english',
-                p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
-                COALESCE(p.description,'') || ' ' || COALESCE(p.category,'')
-              ) @@ websearch_to_tsquery('english', $1)
-              OR similarity(p.name, $1) > 0.2
-              OR similarity(COALESCE(p.brand,''), $1) > 0.25
+              (
+                to_tsvector('english',
+                  p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
+                  COALESCE(p.description,'') || ' ' || COALESCE(p.category,'') || ' ' ||
+                  COALESCE(p.family,'') || ' ' || COALESCE(p.subcategory,'') || ' ' ||
+                  COALESCE(p.barcode,'') || ' ' || COALESCE(p."codeGold",'')
+                ) @@ websearch_to_tsquery('english', $1)
+                OR similarity(p.name, $1) > 0.2
+                OR similarity(COALESCE(p.brand,''), $1) > 0.25
+                OR similarity(COALESCE(p.barcode,''), $1) > 0.3
+                OR similarity(COALESCE(p."codeGold",''), $1) > 0.35
+              )
+              AND ($3::text IS NULL OR strpos(lower(coalesce(p.category,'')), $3) > 0)
+              AND ($4::text IS NULL OR strpos(lower(coalesce(p.subcategory,'')), $4) > 0)
+              AND ($5::text IS NULL OR strpos(lower(coalesce(p.family,'')), $5) > 0)
           )
           SELECT
-            p.id, p.name, p.brand, p.barcode, p.category, p.images,
+            p.id, p.name, p.brand, p."codeGold", p.barcode, p.category, p.subcategory, p.family, p.images,
             COALESCE(f.fts_rank, 0) * 0.7 + COALESCE(f.trgm_score, 0) * 0.3 AS combined_text_score
           FROM products p
           JOIN fts f ON f.id = p.id
           ORDER BY combined_text_score DESC
           LIMIT $2
           `,
-          [query, limit],
+          [query, limit, fc, fs, ff],
         ),
         this.timeout(800, 'text-search'),
       ]);
@@ -215,6 +234,7 @@ export class SearchService {
     fallbackText: string | undefined,
     limit: number,
     weights: ScoringWeights,
+    filters?: ProductSearchFilters,
   ): Promise<SearchResult[]> {
     // Circuit breaker — open?
     if (this.circuit.openUntil > Date.now()) {
@@ -223,7 +243,7 @@ export class SearchService {
       // Fallback: use text search if we have text
       if (fallbackText?.trim()) {
         this.logger.log('Circuit fallback → text search');
-        return this.runTextSearch(fallbackText.trim(), limit, weights);
+        return this.runTextSearch(fallbackText.trim(), limit, weights, filters);
       }
       return [];
     }
@@ -269,7 +289,8 @@ export class SearchService {
       return hits
         .map((hit) => {
           const p = pMap.get(hit.id);
-          return p ? this.toResult(p, hit.score * weights.vector, ['vector'], { vectorScore: hit.score }) : null;
+          if (!p || !this.productMatchesFilters(p, filters)) return null;
+          return this.toResult(p, hit.score * weights.vector, ['vector'], { vectorScore: hit.score });
         })
         .filter(Boolean) as SearchResult[];
 
@@ -289,7 +310,7 @@ export class SearchService {
       // Fallback to text search
       if (fallbackText?.trim()) {
         this.logger.log('Vector failure fallback → text search');
-        return this.runTextSearch(fallbackText.trim(), limit, weights);
+        return this.runTextSearch(fallbackText.trim(), limit, weights, filters);
       }
       return [];
     }
@@ -326,6 +347,74 @@ export class SearchService {
   // Helpers
   // ─────────────────────────────────────────────────────────────────
 
+  /** Sous-chaîne insensible à la casse sur les champs produit. */
+  private productMatchesFilters(p: Product | Record<string, any>, filters?: ProductSearchFilters): boolean {
+    if (!filters) return true;
+    const need = (v?: string | null) => v != null && String(v).trim().length > 0;
+    const hay = (v?: string | null) => String(v ?? '').toLowerCase();
+    if (need(filters.category) && !hay(p.category).includes(filters.category!.trim().toLowerCase())) {
+      return false;
+    }
+    if (need(filters.subcategory) && !hay((p as Product).subcategory).includes(filters.subcategory!.trim().toLowerCase())) {
+      return false;
+    }
+    if (need(filters.family) && !hay((p as Product).family).includes(filters.family!.trim().toLowerCase())) {
+      return false;
+    }
+    return true;
+  }
+
+  /** Candidats à tester pour un scan (EAN, URL produit, QR avec paramètres, etc.). */
+  private barcodeLookupCandidates(raw: string): string[] {
+    const out = new Set<string>();
+    const trimmed = raw.trim();
+    if (trimmed) out.add(trimmed);
+
+    const digitRuns = trimmed.match(/\d{8,20}/g) ?? [];
+    digitRuns.forEach((d) => out.add(d));
+
+    try {
+      const u = new URL(trimmed);
+      for (const key of ['id', 'sku', 'barcode', 'gtin', 'ean', 'codeGold', 'code_gold', 'code']) {
+        const v = u.searchParams.get(key)?.trim();
+        if (v) out.add(v);
+      }
+      const parts = u.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last) {
+        out.add(last);
+        try {
+          const dec = decodeURIComponent(last);
+          if (dec !== last) out.add(dec);
+        } catch { /* ignore */ }
+      }
+    } catch {
+      /* not a parseable URL */
+    }
+
+    return [...out].filter((s) => s.length > 0 && s.length <= MAX_SCAN_PAYLOAD).slice(0, 32);
+  }
+
+  private readonly uuidRe =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  private async resolveScanProduct(raw: string, filters?: ProductSearchFilters): Promise<Product | null> {
+    const candidates = this.barcodeLookupCandidates(raw);
+    for (const c of candidates) {
+      if (this.uuidRe.test(c)) {
+        const p = await this.productRepo.findOne({ where: { id: c } });
+        if (p && this.productMatchesFilters(p, filters)) return p;
+      }
+    }
+    const nonUuid = candidates.filter((c) => !this.uuidRe.test(c));
+    if (!nonUuid.length) return null;
+    const byBarcode = await this.productRepo.find({ where: { barcode: In(nonUuid) } });
+    const hitBc = byBarcode.find((p) => this.productMatchesFilters(p, filters));
+    if (hitBc) return hitBc;
+    const byCodeGold = await this.productRepo.find({ where: { codeGold: In(nonUuid) } });
+    return byCodeGold.find((p) => this.productMatchesFilters(p, filters)) ?? null;
+  }
+
   private toResult(
     product: any,
     score: number,
@@ -333,13 +422,16 @@ export class SearchService {
     debug?: SearchResult['debug'],
   ): SearchResult {
     return {
-      id:       product.id,
-      name:     product.name,
-      brand:    product.brand    ?? null,
-      barcode:  product.barcode  ?? null,
-      category: product.category ?? null,
-      images:   product.images   ?? [],
-      score:    Math.round(score * 10000) / 10000,
+      id:            product.id,
+      name:          product.name,
+      brand:         product.brand         ?? null,
+      codeGold:      product.codeGold      ?? null,
+      barcode:       product.barcode       ?? null,
+      category:      product.category      ?? null,
+      subcategory:   product.subcategory   ?? null,
+      family:        product.family        ?? null,
+      images:        product.images        ?? [],
+      score:         Math.round(score * 10000) / 10000,
       matchedBy,
       debug,
     };
@@ -354,8 +446,20 @@ export class SearchService {
   }
 
   private buildCacheKey(req: SearchRequest): string {
-    const parts = [req.barcode?.trim() ?? '', req.text?.trim().toLowerCase() ?? '', req.limit ?? 20].join(':');
-    return `search:v3:${crypto.createHash('md5').update(parts).digest('hex')}`;
+    const filterPart = req.filters
+      ? JSON.stringify({
+          c: req.filters.category ?? '',
+          s: req.filters.subcategory ?? '',
+          f: req.filters.family ?? '',
+        })
+      : '';
+    const parts = [
+      req.barcode?.trim() ?? '',
+      req.text?.trim().toLowerCase() ?? '',
+      String(req.limit ?? 20),
+      filterPart,
+    ].join(':');
+    return `search:v4:${crypto.createHash('md5').update(parts).digest('hex')}`;
   }
 
   private timeout<T>(ms: number, label: string): Promise<T> {

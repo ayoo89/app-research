@@ -17,7 +17,7 @@ function ProductCard({ item, query, onPress }: Props) {
     <TouchableOpacity
       style={[styles.card, shadow.sm]}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.88}
       accessibilityRole="button"
       accessibilityLabel={`${item.name}${item.brand ? `, ${item.brand}` : ''}`}
     >
@@ -48,8 +48,17 @@ function ProductCard({ item, query, onPress }: Props) {
             numberOfLines={1}
           />
         ) : null}
+        {item.codeGold ? (
+          <Text style={styles.codeGold} numberOfLines={1}>#{item.codeGold}</Text>
+        ) : null}
         {item.category ? (
           <Text style={styles.category} numberOfLines={1}>{item.category}</Text>
+        ) : null}
+        {item.family ? (
+          <Text style={styles.subMeta} numberOfLines={1}>{item.family}</Text>
+        ) : null}
+        {item.subcategory ? (
+          <Text style={styles.subMeta} numberOfLines={1}>{item.subcategory}</Text>
         ) : null}
         <MatchBadge methods={item.matchedBy ?? [item.matchType as any]} />
       </View>
@@ -76,8 +85,21 @@ const styles = StyleSheet.create({
   info:             { flex: 1, padding: spacing.md, justifyContent: 'center' },
   name:             { ...typography.h3, fontSize: 14, lineHeight: 20 },
   brand:            { ...typography.small, marginTop: 2 },
+  codeGold: {
+    ...typography.caption,
+    fontSize: 11,
+    marginTop: 2,
+    color: colors.primary,
+    fontWeight: '600',
+  },
   category: {
     ...typography.caption, marginTop: spacing.xs,
+    color: colors.textMuted,
+  },
+  subMeta: {
+    ...typography.caption,
+    fontSize: 11,
+    marginTop: 2,
     color: colors.textMuted,
   },
   scoreCol: {

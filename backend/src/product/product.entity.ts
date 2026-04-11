@@ -11,6 +11,14 @@ export class Product {
   @Column()
   name: string;
 
+  /**
+   * Référence interne ERP (ex. « CODE GOLD »).
+   * Recherche scan / texte comme l’EAN.
+   */
+  @Index({ unique: true, where: '"codeGold" IS NOT NULL' })
+  @Column({ nullable: true })
+  codeGold: string;
+
   @Column({ nullable: true })
   brand: string;
 
@@ -23,6 +31,17 @@ export class Product {
 
   @Column({ nullable: true })
   category: string;
+
+  /**
+   * Sous-famille ERP (colonne « Sous-Famille »), ex. FLEUR ARTIFICIELLE.
+   * Hiérarchie : catégorie → famille → sous-famille.
+   */
+  @Column({ nullable: true })
+  subcategory: string;
+
+  /** Famille ERP (colonne « Famille »), ex. ART FLORAL. */
+  @Column({ nullable: true })
+  family: string;
 
   @Column({ type: 'jsonb', default: [] })
   images: string[];

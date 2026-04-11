@@ -6,15 +6,18 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/authStore';
+import { useI18n } from '../i18n';
 import Button from '../components/Button';
 import { colors, spacing, radius, typography, shadow } from '../theme';
 
 export default function LoginScreen() {
+  const { t } = useI18n();
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [focused,  setFocused]  = useState<'email' | 'password' | null>(null);
   const passwordRef = useRef<TextInput>(null);
   const shakeAnim   = useRef(new Animated.Value(0)).current;
   const login = useAuthStore((s) => s.login);
@@ -31,12 +34,12 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
-      setError('Please fill in both fields');
+      setError(t('login_error_fill'));
       shake();
       return;
     }
     if (!trimmedEmail.includes('@')) {
-      setError('Enter a valid email address');
+      setError(t('login_error_email'));
       shake();
       return;
     }
@@ -46,7 +49,7 @@ export default function LoginScreen() {
     try {
       await login(trimmedEmail, password);
     } catch (e: any) {
-      const msg = e.message ?? 'Login failed. Check your credentials.';
+      const msg = e.message ?? t('login_error_generic');
       setError(msg);
       shake();
     } finally {
@@ -71,8 +74,8 @@ export default function LoginScreen() {
             <View style={styles.logoCircle}>
               <Text style={styles.logoIcon}>🔍</Text>
             </View>
-            <Text style={styles.title}>Product Search</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+            <Text style={styles.title}>{t('login_title')}</Text>
+            <Text style={styles.subtitle}>{t('login_subtitle')}</Text>
           </View>
 
           {/* Form */}
@@ -83,10 +86,13 @@ export default function LoginScreen() {
               </View>
             ) : null}
 
-            <Text style={styles.fieldLabel}>Email</Text>
+            <Text style={styles.fieldLabel}>{t('login_email')}</Text>
             <TextInput
-              style={styles.input}
-              placeholder="you@company.com"
+              style={[
+                styles.input,
+                focused === 'email' && styles.inputFocused,
+              ]}
+              placeholder={t('login_placeholder_email')}
               placeholderTextColor={colors.placeholder}
               autoCapitalize="none"
               autoCorrect={false}
@@ -95,15 +101,21 @@ export default function LoginScreen() {
               returnKeyType="next"
               value={email}
               onChangeText={(v) => { setEmail(v); setError(''); }}
+              onFocus={() => setFocused('email')}
+              onBlur={() => setFocused((f) => (f === 'email' ? null : f))}
               onSubmitEditing={() => passwordRef.current?.focus()}
-              accessibilityLabel="Email address"
+              accessibilityLabel={t('login_email')}
             />
 
-            <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Password</Text>
+            <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>{t('login_password')}</Text>
             <View style={styles.passwordRow}>
               <TextInput
                 ref={passwordRef}
-                style={[styles.input, styles.passwordInput]}
+                style={[
+                  styles.input,
+                  styles.passwordInput,
+                  focused === 'password' && styles.inputFocused,
+                ]}
                 placeholder="••••••••"
                 placeholderTextColor={colors.placeholder}
                 secureTextEntry={!showPass}
@@ -111,20 +123,22 @@ export default function LoginScreen() {
                 returnKeyType="done"
                 value={password}
                 onChangeText={(v) => { setPassword(v); setError(''); }}
+                onFocus={() => setFocused('password')}
+                onBlur={() => setFocused((f) => (f === 'password' ? null : f))}
                 onSubmitEditing={handleLogin}
-                accessibilityLabel="Password"
+                accessibilityLabel={t('login_password')}
               />
               <TouchableOpacity
                 style={styles.eyeBtn}
                 onPress={() => setShowPass((v) => !v)}
-                accessibilityLabel={showPass ? 'Hide password' : 'Show password'}
+                accessibilityLabel={showPass ? t('login_passToggleHide') : t('login_passToggleShow')}
               >
                 <Text style={styles.eyeIcon}>{showPass ? '🙈' : '👁️'}</Text>
               </TouchableOpacity>
             </View>
 
             <Button
-              label="Sign In"
+              label={t('login_submit')}
               onPress={handleLogin}
               loading={loading}
               style={styles.loginBtn}
@@ -162,7 +176,16 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md,
     paddingHorizontal: spacing.md, paddingVertical: spacing.md,
-    fontSize: 15, color: colors.text, backgroundColor: colors.bg,
+    fontSize: 15, color: colors.text, backgroundColor: colors.surfaceMuted,
+  },
+  inputFocused: {
+    borderColor: colors.borderFocus,
+    backgroundColor: colors.surface,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 2,
   },
   passwordRow:  { position: 'relative' },
   passwordInput: { paddingRight: 48 },

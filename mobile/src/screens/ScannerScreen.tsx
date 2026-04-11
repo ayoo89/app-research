@@ -6,16 +6,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevices, useFrameProcessor } from 'react-native-vision-camera';
 import { scanBarcodes, BarcodeFormat } from 'vision-camera-code-scanner';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { SearchFilters } from '../api/search';
 import { runOnJS } from 'react-native-reanimated';
 import { searchByBarcode } from '../api/search';
 import { useNetworkStore } from '../store/networkStore';
+import { useI18n } from '../i18n';
 import { colors, spacing, radius, typography } from '../theme';
 
 type ScanState = 'scanning' | 'found' | 'searching' | 'not_found' | 'error';
 
 export default function ScannerScreen() {
+  const { t } = useI18n();
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const scanFilters = route.params?.filters as SearchFilters | undefined;
   const isOnline   = useNetworkStore((s) => s.isOnline);
   const devices    = useCameraDevices();
   const device     = devices.back;
@@ -52,14 +57,14 @@ export default function ScannerScreen() {
     setLastBarcode(barcode);
 
     if (!isOnline) {
-      setErrorMsg('No internet connection');
+      setErrorMsg(t('scanner_offline'));
       setScanState('error');
       return;
     }
 
     setScanState('searching');
     try {
-      const res = await searchByBarcode(barcode);
+      const res = await searchByBarcode(barcode, scanFilters);
       if (res.results.length > 0) {
         // Direct hit — go straight to product
         navigation.replace('ProductDetail', {
@@ -70,10 +75,10 @@ export default function ScannerScreen() {
         setScanState('not_found');
       }
     } catch (e: any) {
-      setErrorMsg(e.message ?? 'Lookup failed');
+      setErrorMsg(e.message ?? t('scanner_error'));
       setScanState('error');
     }
-  }, [scanState, isOnline, navigation]);
+  }, [scanState, isOnline, navigation, scanFilters, t]);
 
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
@@ -95,7 +100,7 @@ export default function ScannerScreen() {
   };
 
   const searchManually = () => {
-    navigation.replace('Search', { barcode: lastBarcode });
+    navigation.replace('Search', { barcode: lastBarcode, filters: scanFilters });
   };
 
   // ── Permission states ─────────────────────────────────────────────
@@ -112,10 +117,10 @@ export default function ScannerScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <Text style={styles.permIcon}>📷</Text>
-        <Text style={styles.permTitle}>Camera access needed</Text>
-        <Text style={styles.permSub}>Enable camera permission in Settings to scan barcodes</Text>
+        <Text style={styles.permTitle}>{t('scanner_perm_title')}</Text>
+        <Text style={styles.permSub}>{t('scanner_perm_sub')}</Text>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>Go Back</Text>
+          <Text style={styles.backBtnText}>{t('scanner_back')}</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -124,7 +129,7 @@ export default function ScannerScreen() {
   if (!device) {
     return (
       <View style={styles.center}>
-        <Text style={styles.permTitle}>No camera found</Text>
+        <Text style={styles.permTitle}>{t('scanner_no_cam')}</Text>
       </View>
     );
   }
@@ -154,7 +159,7 @@ export default function ScannerScreen() {
         </View>
         <View style={styles.overlayBottom}>
           <Text style={styles.hint}>
-            {scanState === 'scanning' ? 'Align barcode within the frame' : ''}
+            {scanState === 'scanning' ? t('scanner_hint') : ''}
           </Text>
         </View>
       </View>
@@ -163,7 +168,7 @@ export default function ScannerScreen() {
       {scanState === 'searching' && (
         <View style={styles.statusOverlay}>
           <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.statusText}>Looking up product…</Text>
+          <Text style={styles.statusText}>{t('scanner_status_search')}</Text>
           <Text style={styles.statusSub}>{lastBarcode}</Text>
         </View>
       )}
@@ -171,14 +176,14 @@ export default function ScannerScreen() {
       {scanState === 'not_found' && (
         <View style={styles.statusOverlay}>
           <Text style={styles.statusIcon}>📭</Text>
-          <Text style={styles.statusText}>Product not found</Text>
+          <Text style={styles.statusText}>{t('scanner_status_notfound')}</Text>
           <Text style={styles.statusSub}>{lastBarcode}</Text>
           <View style={styles.statusActions}>
             <TouchableOpacity style={styles.actionBtn} onPress={searchManually}>
-              <Text style={styles.actionBtnText}>Search manually</Text>
+              <Text style={styles.actionBtnText}>{t('scanner_manual')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, styles.actionBtnOutline]} onPress={reset}>
-              <Text style={styles.actionBtnOutlineText}>Scan again</Text>
+              <Text style={styles.actionBtnOutlineText}>{t('scanner_again')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -189,7 +194,7 @@ export default function ScannerScreen() {
           <Text style={styles.statusIcon}>⚠️</Text>
           <Text style={styles.statusText}>{errorMsg}</Text>
           <TouchableOpacity style={styles.actionBtn} onPress={reset}>
-            <Text style={styles.actionBtnText}>Try again</Text>
+            <Text style={styles.actionBtnText}>{t('scanner_retry')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -199,7 +204,7 @@ export default function ScannerScreen() {
         <TouchableOpacity
           style={styles.closeBtn}
           onPress={() => navigation.goBack()}
-          accessibilityLabel="Close scanner"
+          accessibilityLabel={t('scanner_close_a11y')}
           accessibilityRole="button"
         >
           <Text style={styles.closeBtnText}>✕</Text>

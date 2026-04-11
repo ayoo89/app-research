@@ -1,6 +1,8 @@
 import { PipeTransform, Injectable, BadRequestException } from '@nestjs/common';
 
 const MAX_TEXT_LENGTH   = 500;
+const MAX_SCAN_LENGTH   = 2048; // barcode, QR (URL), Data Matrix payload
+const MAX_FILTER_FIELD  = 120;
 const MAX_BASE64_BYTES  = 5 * 1024 * 1024; // 5 MB decoded
 const ALLOWED_IMG_MAGIC = [
   'iVBORw0KGgo',  // PNG
@@ -23,11 +25,30 @@ export class SearchInputPipe implements PipeTransform {
       if (!value.text) delete value.text;
     }
 
-    // Barcode validation
+    // Barcode / QR / Data Matrix — keep payload usable for URLs & GTIN extraction (no aggressive strip)
     if (value.barcode !== undefined) {
       if (typeof value.barcode !== 'string') throw new BadRequestException('barcode must be a string');
-      value.barcode = value.barcode.trim().replace(/[^a-zA-Z0-9\-_.]/g, '');
-      if (!value.barcode) delete value.barcode;
+      const raw = value.barcode.replace(/\0/g, '').trim();
+      if (raw.length > MAX_SCAN_LENGTH) {
+        throw new BadRequestException(`Scan payload too long (max ${MAX_SCAN_LENGTH} characters)`);
+      }
+      value.barcode = raw.length ? raw : undefined;
+    }
+
+    // Optional taxonomy filters (category, subcategory, family)
+    if (value.filters !== undefined) {
+      if (value.filters === null || typeof value.filters !== 'object' || Array.isArray(value.filters)) {
+        throw new BadRequestException('filters must be an object');
+      }
+      const next: Record<string, string> = {};
+      for (const key of ['category', 'subcategory', 'family'] as const) {
+        const v = value.filters[key];
+        if (v === undefined || v === null) continue;
+        if (typeof v !== 'string') throw new BadRequestException(`filters.${key} must be a string`);
+        const s = v.trim().slice(0, MAX_FILTER_FIELD);
+        if (s) next[key] = s;
+      }
+      value.filters = Object.keys(next).length ? next : undefined;
     }
 
     // Image validation

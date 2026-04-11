@@ -7,15 +7,16 @@ export const colors = {
   warning:       '#f59e0b',
   error:         '#ef4444',
   errorLight:    '#fef2f2',
-  bg:            '#f8f9fa',
+  bg:            '#f1f5f9',
   surface:       '#ffffff',
+  surfaceMuted:  '#f8fafc',
   border:        '#e2e8f0',
   borderFocus:   '#4f46e5',
-  text:          '#1e293b',
+  text:          '#0f172a',
   textSecondary: '#64748b',
   textMuted:     '#94a3b8',
-  placeholder:   '#cbd5e1',
-  overlay:       'rgba(0,0,0,0.55)',
+  placeholder:   '#94a3b8',
+  overlay:       'rgba(15,23,42,0.45)',
   scanBox:       '#4f46e5',
   badge: {
     barcode: { bg: '#dcfce7', text: '#166534' },
@@ -43,22 +44,25 @@ export const radius = {
 };
 
 export const typography = {
-  h1:      { fontSize: 28, fontWeight: '700' as const, color: colors.text },
-  h2:      { fontSize: 22, fontWeight: '700' as const, color: colors.text },
-  h3:      { fontSize: 17, fontWeight: '600' as const, color: colors.text },
-  body:    { fontSize: 15, fontWeight: '400' as const, color: colors.text },
-  small:   { fontSize: 13, fontWeight: '400' as const, color: colors.textSecondary },
-  caption: { fontSize: 11, fontWeight: '500' as const, color: colors.textMuted },
-  label:   { fontSize: 12, fontWeight: '600' as const, color: colors.textMuted, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  h1:      { fontSize: 28, lineHeight: 34, fontWeight: '700' as const, color: colors.text },
+  h2:      { fontSize: 22, lineHeight: 28, fontWeight: '700' as const, color: colors.text },
+  h3:      { fontSize: 17, lineHeight: 24, fontWeight: '600' as const, color: colors.text },
+  body:    { fontSize: 15, lineHeight: 22, fontWeight: '400' as const, color: colors.text },
+  small:   { fontSize: 13, lineHeight: 18, fontWeight: '400' as const, color: colors.textSecondary },
+  caption: { fontSize: 11, lineHeight: 14, fontWeight: '500' as const, color: colors.textMuted },
+  label:   { fontSize: 12, lineHeight: 16, fontWeight: '600' as const, color: colors.textMuted, textTransform: 'uppercase' as const, letterSpacing: 0.6 },
 };
 
 export const shadow = {
   sm: {
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06, shadowRadius: 3, elevation: 2,
   },
   md: {
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.10, shadowRadius: 8, elevation: 4,
+    shadowColor: '#0f172a', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08, shadowRadius: 12, elevation: 4,
   },
 };
+
+/** Zone tactile confortable pour petits boutons (header, icônes). */
+export const hitSlop = { top: 12, bottom: 12, left: 12, right: 12 } as const;

@@ -21,12 +21,19 @@ class WeightsDto implements Partial<ScoringWeights> {
   @IsOptional() @IsNumber() @Min(0) @Max(0.5) multiMatchBoost?: number;
 }
 
+class ProductFiltersDto {
+  @IsOptional() @IsString() category?: string;
+  @IsOptional() @IsString() subcategory?: string;
+  @IsOptional() @IsString() family?: string;
+}
+
 class SearchDto {
   @IsOptional() @IsString() barcode?: string;
   @IsOptional() @IsString() text?: string;
   @IsOptional() @IsString() imageBase64?: string;
   @IsOptional() @IsNumber() @Min(1) @Max(50) limit?: number;
   @IsOptional() @IsObject() @ValidateNested() @Type(() => WeightsDto) weights?: WeightsDto;
+  @IsOptional() @IsObject() @ValidateNested() @Type(() => ProductFiltersDto) filters?: ProductFiltersDto;
 }
 
 @ApiTags('search')
@@ -42,7 +49,9 @@ export class SearchController {
   @RateLimit({ limit: 120, windowSec: 60 })  // 120 req/min per IP
   @ApiOperation({
     summary: 'Hybrid product search',
-    description: 'Pipeline: barcode (exact) → text (FTS+trigram) ∥ image (CLIP KNN). Results ranked by weighted score.',
+    description:
+      'Pipeline: code-barres / contenu QR (exact + heuristiques URL) → texte (FTS+trigram) ∥ image (CLIP KNN). ' +
+      'Optionnel: `filters` { category, subcategory, family } pour affiner tous les modes.',
   })
   search(@Body(SearchInputPipe) dto: SearchDto, @Req() req: Request) {
     if (!dto.barcode && !dto.text && !dto.imageBase64) {

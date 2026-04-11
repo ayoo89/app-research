@@ -9,12 +9,21 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../user/user.entity';
 import { AdminService } from './admin.service';
-import { IsEmail, IsString, IsEnum, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsIn } from 'class-validator';
 
 class InviteUserDto {
   @IsEmail() email: string;
   @IsString() name: string;
-  @IsEnum(UserRole) role: UserRole;
+  @IsIn([UserRole.ADMIN, UserRole.USER])
+  role: UserRole;
+}
+
+class CreateUserDto {
+  @IsEmail() email: string;
+  @IsString() @MinLength(8) password: string;
+  @IsString() name: string;
+  @IsIn([UserRole.ADMIN, UserRole.USER])
+  role: UserRole;
 }
 
 @ApiTags('admin')
@@ -30,8 +39,17 @@ export class AdminController {
   @ApiOperation({ summary: 'List all users' })
   listUsers() { return this.adminService.listUsers(); }
 
+  @Post('users')
+  @ApiOperation({
+    summary: 'Créer un utilisateur (e-mail + mot de passe)',
+    description: 'Compte actif immédiatement. Rôle : admin ou user uniquement. Réservé au super administrateur.',
+  })
+  createUser(@Body() dto: CreateUserDto) {
+    return this.adminService.createUserWithPassword(dto.email, dto.name, dto.role, dto.password);
+  }
+
   @Post('users/invite')
-  @ApiOperation({ summary: 'Invite a new user via email' })
+  @ApiOperation({ summary: 'Inviter un utilisateur par e-mail (lien d’activation)' })
   inviteUser(@Body() dto: InviteUserDto) {
     return this.adminService.inviteUser(dto.email, dto.name, dto.role);
   }

@@ -13,10 +13,13 @@ import { IsString, IsOptional, IsArray } from 'class-validator';
 
 class CreateProductDto {
   @IsString() name: string;
+  @IsOptional() @IsString() codeGold?: string;
   @IsOptional() @IsString() brand?: string;
   @IsOptional() @IsString() barcode?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() category?: string;
+  @IsOptional() @IsString() subcategory?: string;
+  @IsOptional() @IsString() family?: string;
   @IsOptional() @IsArray() images?: string[];
 }
 

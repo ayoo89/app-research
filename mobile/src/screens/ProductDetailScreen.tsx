@@ -8,12 +8,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FastImage from 'react-native-fast-image';
 import { useNavigation } from '@react-navigation/native';
 import { getProduct, Product } from '../api/search';
+import { useI18n } from '../i18n';
 import EmptyState from '../components/EmptyState';
 import { colors, spacing, radius, shadow, typography } from '../theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
 export default function ProductDetailScreen({ route }: any) {
+  const { t } = useI18n();
   const { id, fromScan } = route.params as { id: string; fromScan?: boolean };
   const navigation = useNavigation<any>();
 
@@ -31,11 +33,11 @@ export default function ProductDetailScreen({ route }: any) {
       setProduct(p);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     } catch (e: any) {
-      setError(e.message ?? 'Failed to load product');
+      setError(e.message ?? t('product_error_sub'));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -50,7 +52,7 @@ export default function ProductDetailScreen({ route }: any) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading product…</Text>
+        <Text style={styles.loadingText}>{t('product_loading')}</Text>
       </View>
     );
   }
@@ -62,9 +64,9 @@ export default function ProductDetailScreen({ route }: any) {
       <SafeAreaView style={styles.center} edges={['bottom']}>
         <EmptyState
           icon="⚠️"
-          title="Couldn't load product"
-          subtitle={error || 'Product not found'}
-          actionLabel="Try again"
+          title={t('product_error_title')}
+          subtitle={error || t('product_error_sub')}
+          actionLabel={t('product_retry')}
           onAction={load}
         />
       </SafeAreaView>
@@ -136,28 +138,37 @@ export default function ProductDetailScreen({ route }: any) {
 
           {/* Key info row */}
           <View style={[styles.infoCard, shadow.sm]}>
-            {product.barcode ? (
-              <InfoRow icon="⬛" label="Barcode" value={product.barcode} />
-            ) : null}
-            {product.brand ? (
-              <InfoRow icon="🏷️" label="Brand" value={product.brand} />
-            ) : null}
-            {product.category ? (
-              <InfoRow icon="📂" label="Category" value={product.category} last />
-            ) : null}
+            {(() => {
+              const rows: { icon: string; label: string; value: string }[] = [];
+              if (product.barcode) rows.push({ icon: '⬛', label: t('product_label_ean'), value: product.barcode });
+              if (product.codeGold) rows.push({ icon: '🔢', label: t('product_label_gold'), value: product.codeGold });
+              if (product.brand) rows.push({ icon: '🏷️', label: t('product_label_brand'), value: product.brand });
+              if (product.category) rows.push({ icon: '📂', label: t('product_label_category'), value: product.category });
+              if (product.family) rows.push({ icon: '👪', label: t('product_label_family'), value: product.family });
+              if (product.subcategory) rows.push({ icon: '📁', label: t('product_label_subfamily'), value: product.subcategory });
+              return rows.map((row, i) => (
+                <InfoRow
+                  key={row.label + row.value.slice(0, 20)}
+                  icon={row.icon}
+                  label={row.label}
+                  value={row.value}
+                  last={i === rows.length - 1}
+                />
+              ));
+            })()}
           </View>
 
           {/* Description */}
           {product.description ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Description</Text>
+              <Text style={styles.sectionTitle}>{t('product_section_desc')}</Text>
               <Text style={styles.description}>{product.description}</Text>
             </View>
           ) : null}
 
           {/* No description fallback */}
           {!product.description && !product.brand && !product.barcode ? (
-            <Text style={styles.noData}>No additional details available</Text>
+            <Text style={styles.noData}>{t('product_noData')}</Text>
           ) : null}
         </View>
       </ScrollView>
@@ -168,9 +179,9 @@ export default function ProductDetailScreen({ route }: any) {
           style={styles.searchSimilarBtn}
           onPress={() => navigation.navigate('Search', {})}
           accessibilityRole="button"
-          accessibilityLabel="Search similar products"
+          accessibilityLabel={t('product_similarA11y')}
         >
-          <Text style={styles.searchSimilarText}>🔍  Search similar products</Text>
+          <Text style={styles.searchSimilarText}>{t('product_similar')}</Text>
         </TouchableOpacity>
       </SafeAreaView>
     </Animated.View>
@@ -251,7 +262,8 @@ const styles = StyleSheet.create({
   footer:          { backgroundColor: colors.surface, paddingHorizontal: spacing.xl, paddingTop: spacing.md },
   searchSimilarBtn: {
     backgroundColor: colors.primaryLight, borderRadius: radius.md,
-    paddingVertical: spacing.md, alignItems: 'center', marginBottom: spacing.sm,
+    paddingVertical: spacing.lg, alignItems: 'center', marginBottom: spacing.sm,
+    minHeight: 52,
   },
   searchSimilarText: { ...typography.body, color: colors.primary, fontWeight: '600' },
 });
