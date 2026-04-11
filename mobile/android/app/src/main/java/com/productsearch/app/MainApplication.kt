@@ -5,7 +5,6 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
@@ -14,6 +13,8 @@ class MainApplication : Application(), ReactApplication {
 
     override val reactNativeHost: ReactNativeHost =
         object : DefaultReactNativeHost(this) {
+            // No PackageList (requires RN Gradle plugin) — native modules
+            // that need auto-linking should be added here manually if needed
             override fun getPackages(): List<ReactPackage> = emptyList()
 
             override fun getJSMainModuleName(): String = "index"

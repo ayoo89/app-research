@@ -12,6 +12,11 @@ mobile/android/app/release.keystore
 mobile/android/app/debug.keystore
 mobile/android/keystore.properties
 
+# Generated Android assets (built by Metro/Gradle — not source)
+mobile/android/app/src/main/assets/index.android.bundle
+mobile/android/app/src/main/assets/index.android.bundle.map
+mobile/android/app/src/main/res/drawable-*/node_modules_*
+
 # Keystore generation — local only, NEVER commit
 keystore_secrets.txt
 generate_keystore.py
