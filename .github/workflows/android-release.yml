@@ -28,8 +28,9 @@ jobs:
         with:
           node-version: '22'
 
-      # npm install MUST run before Gradle so node_modules/@react-native/gradle-plugin
-      # exists when settings.gradle tries to includeBuild() it
+      # CRITICAL: npm install must run before ANY Gradle invocation.
+      # settings.gradle does includeBuild("../node_modules/@react-native/gradle-plugin")
+      # which fails if node_modules doesn't exist yet.
       - name: Install JS dependencies
         working-directory: mobile
         run: npm install --legacy-peer-deps
@@ -58,11 +59,15 @@ jobs:
         working-directory: mobile/android
         env:
           API_BASE_URL: ${{ github.event.inputs.api_url }}
-        run: ./gradlew assembleRelease -PAPI_BASE_URL="$API_BASE_URL" --no-daemon
-
-      - name: Verify bundle and APK
+        # Run from mobile/ so Gradle can find node_modules via relative paths
         run: |
-          echo "=== APK files ==="
+          cd ..
+          ./android/gradlew -p android assembleRelease \
+            -PAPI_BASE_URL="$API_BASE_URL" \
+            --no-daemon
+
+      - name: Verify APK
+        run: |
           find mobile/android/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
