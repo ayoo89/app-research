@@ -52,8 +52,19 @@ export const useAuthStore = create<AuthState>((set) => {
           return;
         }
 
-        const { data } = await apiClient.get('/auth/me');
-        set({ user: data, isLoading: false });
+        // Timeout after 5s so the app doesn't hang if the server is unreachable
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const { data } = await apiClient.get('/auth/me');
+          set({ user: data, isLoading: false });
+        } catch {
+          // Server unreachable or token invalid — go to login
+          await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
+          set({ user: null, isLoading: false });
+        } finally {
+          clearTimeout(timer);
+        }
       } catch {
         await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
         set({ user: null, isLoading: false });

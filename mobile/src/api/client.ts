@@ -17,7 +17,7 @@ export const BASE_URL: string = (process.env.API_URL as string) ?? DEV_URL;
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 12000,
+  timeout: 8000,  // 8s — fast enough for real devices, avoids white screen hang
   headers: { 'Content-Type': 'application/json' },
 });
 

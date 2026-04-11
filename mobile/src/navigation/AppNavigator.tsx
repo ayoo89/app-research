@@ -62,14 +62,16 @@ export default function AppNavigator() {
 
   if (isLoading) {
     return (
-      <View style={styles.splash}>
-        <View style={styles.splashLogo}>
-          <Text style={styles.splashIcon}>🔍</Text>
+      <SafeAreaProvider>
+        <View style={styles.splash}>
+          <View style={styles.splashLogo}>
+            <Text style={styles.splashIcon}>🔍</Text>
+          </View>
+          <Text style={styles.splashTitle}>{t('splash_title')}</Text>
+          <Text style={styles.splashSub}>{t('splash_subtitle')}</Text>
+          <ActivityIndicator size="large" color={colors.primary} style={styles.splashSpinner} />
         </View>
-        <Text style={styles.splashTitle}>{t('splash_title')}</Text>
-        <Text style={styles.splashSub}>{t('splash_subtitle')}</Text>
-        <ActivityIndicator size="large" color={colors.primary} style={styles.splashSpinner} />
-      </View>
+      </SafeAreaProvider>
     );
   }
 
