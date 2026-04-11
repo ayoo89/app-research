@@ -8,11 +8,3 @@ pluginManagement {
 
 rootProject.name = 'ProductSearchApp'
 include ':app'
-
-// Include react-native-reanimated as a subproject for JSI native compilation.
-// Only this package needs native compilation — others work via the JS bundle.
-def reanimatedDir = new File(rootDir, "../node_modules/react-native-reanimated/android")
-if (reanimatedDir.exists()) {
-    include ':react-native-reanimated'
-    project(':react-native-reanimated').projectDir = reanimatedDir
-}
