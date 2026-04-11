@@ -14,10 +14,7 @@ def getKeystoreProp = { key ->
 }
 
 // ── Node.js auto-detection ────────────────────────────────────────────────────
-// Android Studio on Windows doesn't inherit system PATH.
-// We try multiple known locations in order.
 def findNodeExecutable = {
-    // 1. Explicit override in local.properties: nodejs.dir=C:\\Program Files\\nodejs
     def localProps = new Properties()
     def localPropsFile = rootProject.file("local.properties")
     if (localPropsFile.exists()) {
@@ -31,14 +28,12 @@ def findNodeExecutable = {
         if (nodeUnix.exists()) return nodeUnix.absolutePath
     }
 
-    // 2. Environment variable NODE_HOME
     def nodeHome = System.getenv("NODE_HOME")
     if (nodeHome) {
         def nodeExe = new File(nodeHome, "node.exe")
         if (nodeExe.exists()) return nodeExe.absolutePath
     }
 
-    // 3. Common Windows install paths
     def windowsPaths = [
         "C:\\Program Files\\nodejs\\node.exe",
         "C:\\Program Files (x86)\\nodejs\\node.exe",
@@ -49,13 +44,11 @@ def findNodeExecutable = {
         if (path && new File(path).exists()) return path
     }
 
-    // 4. Common Unix/Mac paths
     def unixPaths = ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node"]
     for (path in unixPaths) {
         if (new File(path).exists()) return path
     }
 
-    // 5. Fallback — hope it's on PATH (works in CI and terminal builds)
     return "node"
 }
 
@@ -72,16 +65,12 @@ task bundleReleaseJs(type: Exec) {
 
     bundleDir.mkdirs()
 
-    // Use the react-native CLI from node_modules (avoids global install issues)
-    def rnCli = new File(nodeModules, ".bin/react-native")
-    // On Windows the CLI is react-native.cmd
+    def rnCli    = new File(nodeModules, ".bin/react-native")
     def rnCliCmd = new File(nodeModules, ".bin/react-native.cmd")
-
     def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
 
     if (isWindows && rnCliCmd.exists()) {
-        // Windows: use cmd.exe to run the .cmd script
-        commandLine "cmd", "/c",
+        commandLine = ["cmd", "/c",
             rnCliCmd.absolutePath,
             "bundle",
             "--platform", "android",
@@ -89,10 +78,9 @@ task bundleReleaseJs(type: Exec) {
             "--entry-file", new File(projectRoot, "index.js").absolutePath,
             "--bundle-output", bundleFile.absolutePath,
             "--assets-dest", resDir.absolutePath,
-            "--reset-cache"
+            "--reset-cache"]
     } else {
-        // Unix / CI
-        commandLine nodeExecutable,
+        commandLine = [nodeExecutable,
             rnCli.absolutePath,
             "bundle",
             "--platform", "android",
@@ -100,59 +88,58 @@ task bundleReleaseJs(type: Exec) {
             "--entry-file", new File(projectRoot, "index.js").absolutePath,
             "--bundle-output", bundleFile.absolutePath,
             "--assets-dest", resDir.absolutePath,
-            "--reset-cache"
+            "--reset-cache"]
     }
 
-    // Run from project root so Metro can find node_modules
-    workingDir projectRoot
+    workingDir = projectRoot
 }
 
 android {
-    compileSdkVersion 34
-    buildToolsVersion "34.0.0"
-    namespace "com.productsearch.app"
+    compileSdk = 34
+    buildToolsVersion = "34.0.0"
+    namespace = "com.productsearch.app"
 
     defaultConfig {
-        applicationId "com.productsearch.app"
-        minSdkVersion 24
-        targetSdkVersion 34
-        versionCode 1
-        versionName "1.0.0"
+        applicationId = "com.productsearch.app"
+        minSdk        = 24
+        targetSdk     = 34
+        versionCode   = 1
+        versionName   = "1.0.0"
 
         def apiBaseUrl = project.findProperty("API_BASE_URL")
             ?: System.getenv("API_BASE_URL")
             ?: "https://api.yourdomain.com/api/v1"
-        buildConfigField "String", "API_BASE_URL", "\"${apiBaseUrl}\""
+        buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrl}\"")
     }
 
     signingConfigs {
         release {
-            storeFile     file(getKeystoreProp("MYAPP_UPLOAD_STORE_FILE") ?: "release.keystore")
-            storePassword getKeystoreProp("MYAPP_UPLOAD_STORE_PASSWORD")
-            keyAlias      getKeystoreProp("MYAPP_UPLOAD_KEY_ALIAS")
-            keyPassword   getKeystoreProp("MYAPP_UPLOAD_KEY_PASSWORD")
+            storeFile     = file(getKeystoreProp("MYAPP_UPLOAD_STORE_FILE") ?: "release.keystore")
+            storePassword = getKeystoreProp("MYAPP_UPLOAD_STORE_PASSWORD")
+            keyAlias      = getKeystoreProp("MYAPP_UPLOAD_KEY_ALIAS")
+            keyPassword   = getKeystoreProp("MYAPP_UPLOAD_KEY_PASSWORD")
         }
     }
 
     buildTypes {
         debug {
-            applicationIdSuffix ".debug"
+            applicationIdSuffix = ".debug"
         }
         release {
-            signingConfig   signingConfigs.release
-            minifyEnabled   false
-            shrinkResources false
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            signingConfig   = signingConfigs.release
+            minifyEnabled   = false
+            shrinkResources = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
     buildFeatures {
-        buildConfig true
+        buildConfig = true
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     packagingOptions {
@@ -161,7 +148,6 @@ android {
         }
     }
 
-    // Wire JS bundle into release build only
     applicationVariants.all { variant ->
         if (variant.buildType.name == "release") {
             variant.mergeAssetsProvider.get().dependsOn(bundleReleaseJs)
@@ -175,6 +161,6 @@ repositories {
 }
 
 dependencies {
-    implementation "com.facebook.react:react-android:0.73.0"
-    implementation "com.facebook.react:hermes-android:0.73.0"
+    implementation("com.facebook.react:react-android:0.73.0")
+    implementation("com.facebook.react:hermes-android:0.73.0")
 }
