@@ -13,27 +13,25 @@ rootProject.name = 'ProductSearchApp'
 include ':app'
 
 // ── React Native package includes ─────────────────────────────────────────────
-// Each package's Android source is included as a Gradle subproject
-
 def nodeModulesDir = new File(rootDir, "../node_modules")
 
-def includePackage = { String packageName, String subPath = "android" ->
-    def dir = new File(nodeModulesDir, "${packageName}/${subPath}")
+// Helper: include a package's android dir as a subproject with a clean name
+def includeRNPackage = { String packageName, String projectName ->
+    def dir = new File(nodeModulesDir, "${packageName}/android")
     if (dir.exists()) {
-        def projectName = ":${packageName.replace('/', '_').replace('@', '')}"
-        include projectName
-        project(projectName).projectDir = dir
+        include ":${projectName}"
+        project(":${projectName}").projectDir = dir
     }
 }
 
-includePackage("react-native-gesture-handler")
-includePackage("react-native-reanimated")
-includePackage("react-native-screens")
-includePackage("react-native-safe-area-context")
-includePackage("react-native-fast-image")
-includePackage("react-native-image-picker")
-includePackage("@react-native-async-storage/async-storage")
-includePackage("@react-native-community/netinfo")
-includePackage("react-native-fs")
-includePackage("react-native-vision-camera")
-includePackage("react-native-haptic-feedback")
+includeRNPackage("react-native-gesture-handler",          "rn-gesture-handler")
+includeRNPackage("react-native-reanimated",               "rn-reanimated")
+includeRNPackage("react-native-screens",                  "rn-screens")
+includeRNPackage("react-native-safe-area-context",        "rn-safe-area-context")
+includeRNPackage("react-native-fast-image",               "rn-fast-image")
+includeRNPackage("react-native-image-picker",             "rn-image-picker")
+includeRNPackage("@react-native-async-storage/async-storage", "rn-async-storage")
+includeRNPackage("@react-native-community/netinfo",       "rn-netinfo")
+includeRNPackage("react-native-fs",                       "rn-fs")
+includeRNPackage("react-native-vision-camera",            "rn-vision-camera")
+includeRNPackage("react-native-haptic-feedback",          "rn-haptic-feedback")
