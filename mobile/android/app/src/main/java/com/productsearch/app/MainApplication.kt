@@ -18,11 +18,11 @@ class MainApplication : Application(), ReactApplication {
             override fun getPackages(): List<ReactPackage> =
                 PackageList(this).packages
 
-            // Must match the entry file used in bundleReleaseJs task
             override fun getJSMainModuleName(): String = "index"
 
             override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
+            // New Architecture disabled — set in gradle.properties: newArchEnabled=false
             override val isNewArchEnabled: Boolean = false
             override val isHermesEnabled: Boolean = true
         }
