@@ -9,7 +9,10 @@ pluginManagement {
 rootProject.name = 'ProductSearchApp'
 include ':app'
 
-// NOTE: native_modules.gradle intentionally NOT applied here.
-// It auto-includes all RN packages as subprojects, which breaks with AGP 8.3
-// because older packages (react-native-fast-image etc.) don't have 'namespace'.
-// Native modules are handled via emptyList() in MainApplication.kt.
+// Include react-native-reanimated as a subproject for JSI native compilation.
+// Only this package needs native compilation — others work via the JS bundle.
+def reanimatedDir = new File(rootDir, "../node_modules/react-native-reanimated/android")
+if (reanimatedDir.exists()) {
+    include ':react-native-reanimated'
+    project(':react-native-reanimated').projectDir = reanimatedDir
+}
