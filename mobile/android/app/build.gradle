@@ -1,5 +1,4 @@
 apply plugin: "com.android.application"
-apply plugin: "com.facebook.react"
 apply plugin: "kotlin-android"
 
 // ── Keystore ──────────────────────────────────────────────────────────────────
@@ -46,14 +45,38 @@ def findNodeExecutable = {
 def nodeExecutable = findNodeExecutable()
 logger.lifecycle("Using Node.js: ${nodeExecutable}")
 
-// ── React Native Gradle Plugin config ────────────────────────────────────────
-react {
-    // The RN Gradle plugin handles JS bundling and auto-linking
-    hermesEnabled = true
-    entryFile = file("../../index.js")
-    bundleAssetName = "index.android.bundle"
-    bundleCommand = "bundle"
-    extraPackagerArgs = []
+// ── JS Bundle task ────────────────────────────────────────────────────────────
+task bundleReleaseJs(type: Exec) {
+    def projectRoot = new File(projectDir, "../..").canonicalFile
+    def nodeModules = new File(projectRoot, "node_modules")
+    def bundleDir   = new File(projectDir, "src/main/assets")
+    def bundleFile  = new File(bundleDir, "index.android.bundle")
+    def resDir      = new File(projectDir, "src/main/res")
+
+    bundleDir.mkdirs()
+
+    def rnCli    = new File(nodeModules, ".bin/react-native")
+    def rnCliCmd = new File(nodeModules, ".bin/react-native.cmd")
+    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+
+    if (isWindows && rnCliCmd.exists()) {
+        commandLine = ["cmd", "/c",
+            rnCliCmd.absolutePath, "bundle",
+            "--platform", "android", "--dev", "false",
+            "--entry-file", new File(projectRoot, "index.js").absolutePath,
+            "--bundle-output", bundleFile.absolutePath,
+            "--assets-dest", resDir.absolutePath,
+            "--reset-cache"]
+    } else {
+        commandLine = [nodeExecutable,
+            rnCli.absolutePath, "bundle",
+            "--platform", "android", "--dev", "false",
+            "--entry-file", new File(projectRoot, "index.js").absolutePath,
+            "--bundle-output", bundleFile.absolutePath,
+            "--assets-dest", resDir.absolutePath,
+            "--reset-cache"]
+    }
+    workingDir = projectRoot
 }
 
 android {
@@ -120,6 +143,12 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == "release") {
+            variant.mergeAssetsProvider.get().dependsOn(bundleReleaseJs)
+        }
+    }
 }
 
 repositories {
@@ -128,7 +157,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.facebook.react:react-android")
-    implementation("com.facebook.react:hermes-android")
+    implementation("com.facebook.react:react-android:0.73.0")
+    implementation("com.facebook.react:hermes-android:0.73.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
 }
