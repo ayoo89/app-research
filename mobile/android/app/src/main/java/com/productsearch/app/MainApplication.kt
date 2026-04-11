@@ -13,6 +13,8 @@ class MainApplication : Application(), ReactApplication {
 
     override val reactNativeHost: ReactNativeHost =
         object : DefaultReactNativeHost(this) {
+            // PackageList requires the RN Gradle plugin which we don't use.
+            // Native modules work via the JS bundle — emptyList() is correct here.
             override fun getPackages(): List<ReactPackage> = emptyList()
 
             override fun getJSMainModuleName(): String = "index"
