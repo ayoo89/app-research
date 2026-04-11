@@ -59,10 +59,10 @@ jobs:
         working-directory: mobile/android
         env:
           API_BASE_URL: ${{ github.event.inputs.api_url }}
-        # Run from mobile/ so Gradle can find node_modules via relative paths
         run: |
-          cd ..
-          ./android/gradlew -p android assembleRelease \
+          # Verify node_modules exists (npm install ran in previous step)
+          ls ../node_modules/@react-native/gradle-plugin/build.gradle || echo "WARNING: RN gradle plugin not found"
+          ./gradlew assembleRelease \
             -PAPI_BASE_URL="$API_BASE_URL" \
             --no-daemon
 

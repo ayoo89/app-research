@@ -1,4 +1,6 @@
 pluginManagement {
+    // The path is relative to this settings.gradle file (mobile/android/)
+    // node_modules is at mobile/node_modules/ → one level up
     includeBuild("../node_modules/@react-native/gradle-plugin")
     repositories {
         google()
