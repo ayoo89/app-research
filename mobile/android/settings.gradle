@@ -11,3 +11,29 @@ plugins {
 
 rootProject.name = 'ProductSearchApp'
 include ':app'
+
+// ── React Native package includes ─────────────────────────────────────────────
+// Each package's Android source is included as a Gradle subproject
+
+def nodeModulesDir = new File(rootDir, "../node_modules")
+
+def includePackage = { String packageName, String subPath = "android" ->
+    def dir = new File(nodeModulesDir, "${packageName}/${subPath}")
+    if (dir.exists()) {
+        def projectName = ":${packageName.replace('/', '_').replace('@', '')}"
+        include projectName
+        project(projectName).projectDir = dir
+    }
+}
+
+includePackage("react-native-gesture-handler")
+includePackage("react-native-reanimated")
+includePackage("react-native-screens")
+includePackage("react-native-safe-area-context")
+includePackage("react-native-fast-image")
+includePackage("react-native-image-picker")
+includePackage("@react-native-async-storage/async-storage")
+includePackage("@react-native-community/netinfo")
+includePackage("react-native-fs")
+includePackage("react-native-vision-camera")
+includePackage("react-native-haptic-feedback")

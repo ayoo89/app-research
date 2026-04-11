@@ -178,4 +178,17 @@ dependencies {
     implementation("com.facebook.react:react-android:0.73.0")
     implementation("com.facebook.react:hermes-android:0.73.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+
+    // Native module packages — included as subprojects from node_modules
+    implementation(project(":react-native-gesture-handler"))
+    implementation(project(":react-native-reanimated"))
+    implementation(project(":react-native-screens"))
+    implementation(project(":react-native-safe-area-context"))
+    implementation(project(":react-native-fast-image"))
+    implementation(project(":react-native-image-picker"))
+    implementation(project(":react-native-async-storageAsync-storage"))
+    implementation(project(":react-native-communityNetinfo"))
+    implementation(project(":react-native-fs"))
+    implementation(project(":react-native-vision-camera"))
+    implementation(project(":react-native-haptic-feedback"))
 }

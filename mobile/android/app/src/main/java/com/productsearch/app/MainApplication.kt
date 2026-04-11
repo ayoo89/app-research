@@ -9,13 +9,36 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
 
+// Native module packages
+import com.swmansion.gesturehandler.RNGestureHandlerPackage
+import com.swmansion.reanimated.ReanimatedPackage
+import com.swmansion.rnscreens.RNScreensPackage
+import com.th3rdwave.safeareacontext.SafeAreaContextPackage
+import com.dylanvann.fastimage.FastImageViewPackage
+import com.imagepicker.ImagePickerPackage
+import com.reactnativecommunity.asyncstorage.AsyncStoragePackage
+import com.reactnativecommunity.netinfo.RNCNetInfoPackage
+import com.rnfs.RNFSPackage
+import com.mrousavy.camera.RNVisionCameraPackage
+import com.oblador.hapticfeedback.RNHapticFeedbackPackage
+
 class MainApplication : Application(), ReactApplication {
 
     override val reactNativeHost: ReactNativeHost =
         object : DefaultReactNativeHost(this) {
-            // No PackageList (requires RN Gradle plugin) — native modules
-            // that need auto-linking should be added here manually if needed
-            override fun getPackages(): List<ReactPackage> = emptyList()
+            override fun getPackages(): List<ReactPackage> = listOf(
+                RNGestureHandlerPackage(),
+                ReanimatedPackage(),
+                RNScreensPackage(),
+                SafeAreaContextPackage(),
+                FastImageViewPackage(),
+                ImagePickerPackage(),
+                AsyncStoragePackage(),
+                RNCNetInfoPackage(),
+                RNFSPackage(),
+                RNVisionCameraPackage(),
+                RNHapticFeedbackPackage(),
+            )
 
             override fun getJSMainModuleName(): String = "index"
 
