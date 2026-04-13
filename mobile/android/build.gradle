@@ -11,12 +11,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // AGP 8.3.2 requires Gradle 8.4+ — we use gradle-8.6
         classpath("com.android.tools.build:gradle:8.3.2")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
-        // NOTE: do NOT add react-native-gradle-plugin here — it is only
-        // available via node_modules, not Maven Central. We handle JS
-        // bundling with a custom Gradle task instead.
     }
 }
 
@@ -25,8 +21,27 @@ allprojects {
         google()
         mavenCentral()
         maven { url = "https://www.jitpack.io" }
-        // React Native AAR — resolved from node_modules
         maven { url = new File(rootDir, "../node_modules/react-native/android").toURI() }
         maven { url = new File(rootDir, "../node_modules/jsc-android/dist").toURI() }
+    }
+}
+
+// Patch missing namespace for older RN packages that predate AGP 8 requirement
+subprojects { subproject ->
+    afterEvaluate {
+        if (subproject.hasProperty('android')) {
+            def android = subproject.extensions.findByName('android')
+            if (android != null && android.hasProperty('namespace') && !android.namespace) {
+                // Read namespace from AndroidManifest.xml package attribute
+                def manifestFile = new File(subproject.projectDir, 'src/main/AndroidManifest.xml')
+                if (manifestFile.exists()) {
+                    def manifest = new XmlSlurper().parse(manifestFile)
+                    def pkg = manifest.@package?.toString()
+                    if (pkg) {
+                        android.namespace = pkg
+                    }
+                }
+            }
+        }
     }
 }
