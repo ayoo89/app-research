@@ -8,3 +8,17 @@ pluginManagement {
 
 rootProject.name = 'ProductSearchApp'
 include ':app'
+
+// Native packages that need Gradle compilation
+def nodeModulesDir = new File(rootDir, "../node_modules")
+
+def includePackage = { String pkg, String projectName ->
+    def dir = new File(nodeModulesDir, "${pkg}/android")
+    if (dir.exists()) {
+        include ":${projectName}"
+        project(":${projectName}").projectDir = dir
+    }
+}
+
+includePackage("@react-native-async-storage/async-storage", "async-storage")
+includePackage("@react-native-community/netinfo",           "netinfo")
