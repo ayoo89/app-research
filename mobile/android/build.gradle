@@ -25,27 +25,3 @@ allprojects {
         maven { url = new File(rootDir, "../node_modules/jsc-android/dist").toURI() }
     }
 }
-
-// Patch missing namespace and buildConfig for older RN packages (AGP 8 requirements)
-subprojects { subproject ->
-    afterEvaluate {
-        if (subproject.hasProperty('android')) {
-            def android = subproject.extensions.findByName('android')
-            if (android != null) {
-                // Patch 1: add namespace from AndroidManifest if missing
-                if (android.hasProperty('namespace') && !android.namespace) {
-                    def manifestFile = new File(subproject.projectDir, 'src/main/AndroidManifest.xml')
-                    if (manifestFile.exists()) {
-                        def manifest = new XmlSlurper().parse(manifestFile)
-                        def pkg = manifest.@package?.toString()
-                        if (pkg) android.namespace = pkg
-                    }
-                }
-                // Patch 2: enable buildConfig if the package uses it
-                if (android.hasProperty('buildFeatures')) {
-                    android.buildFeatures.buildConfig = true
-                }
-            }
-        }
-    }
-}

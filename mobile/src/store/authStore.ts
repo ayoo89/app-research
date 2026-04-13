@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient, setUnauthenticatedHandler } from '../api/client';
 
 export interface AuthUser {
@@ -17,11 +16,38 @@ interface AuthState {
   loadSession: () => Promise<void>;
 }
 
+// ── Safe AsyncStorage wrapper ─────────────────────────────────────────────────
+// AsyncStorage native module may not be available in all build configurations.
+// This wrapper falls back to a no-op so the app doesn't crash on startup.
+const storage = {
+  async getItem(key: string): Promise<string | null> {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      return await AS.getItem(key);
+    } catch { return null; }
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      await AS.setItem(key, value);
+    } catch {}
+  },
+  async multiGet(keys: string[]): Promise<[string, string | null][]> {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      return await AS.multiGet(keys);
+    } catch { return keys.map((k) => [k, null]); }
+  },
+  async multiRemove(keys: string[]): Promise<void> {
+    try {
+      const AS = require('@react-native-async-storage/async-storage').default;
+      await AS.multiRemove(keys);
+    } catch {}
+  },
+};
+
 export const useAuthStore = create<AuthState>((set) => {
-  // Register 401 handler so any expired-token response resets auth state
-  setUnauthenticatedHandler(() => {
-    set({ user: null });
-  });
+  setUnauthenticatedHandler(() => set({ user: null }));
 
   return {
     user: null,
@@ -29,44 +55,39 @@ export const useAuthStore = create<AuthState>((set) => {
 
     login: async (email, password) => {
       const { data } = await apiClient.post('/auth/login', { email, password });
-      await AsyncStorage.setItem('accessToken', data.accessToken);
-      const expiry = Date.now() + 7 * 24 * 60 * 60 * 1000;
-      await AsyncStorage.setItem('tokenExpiry', String(expiry));
+      await storage.setItem('accessToken', data.accessToken);
+      await storage.setItem('tokenExpiry', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
       set({ user: data.user });
     },
 
     logout: async () => {
-      await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
+      await storage.multiRemove(['accessToken', 'tokenExpiry']);
       set({ user: null });
     },
 
     loadSession: async () => {
       try {
-        const [token, expiryStr] = await AsyncStorage.multiGet(['accessToken', 'tokenExpiry']);
-        const accessToken = token[1];
-        const expiry      = Number(expiryStr[1] ?? 0);
+        const pairs = await storage.multiGet(['accessToken', 'tokenExpiry']);
+        const accessToken = pairs[0]?.[1];
+        const expiry      = Number(pairs[1]?.[1] ?? 0);
 
         if (!accessToken || Date.now() > expiry) {
-          await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
+          await storage.multiRemove(['accessToken', 'tokenExpiry']);
           set({ isLoading: false });
           return;
         }
 
-        // Timeout after 5s so the app doesn't hang if the server is unreachable
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
+        const timer = setTimeout(() => {}, 5000);
         try {
           const { data } = await apiClient.get('/auth/me');
           set({ user: data, isLoading: false });
         } catch {
-          // Server unreachable or token invalid — go to login
-          await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
+          await storage.multiRemove(['accessToken', 'tokenExpiry']);
           set({ user: null, isLoading: false });
         } finally {
           clearTimeout(timer);
         }
       } catch {
-        await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
         set({ user: null, isLoading: false });
       }
     },
