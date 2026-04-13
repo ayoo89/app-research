@@ -26,20 +26,24 @@ allprojects {
     }
 }
 
-// Patch missing namespace for older RN packages that predate AGP 8 requirement
+// Patch missing namespace and buildConfig for older RN packages (AGP 8 requirements)
 subprojects { subproject ->
     afterEvaluate {
         if (subproject.hasProperty('android')) {
             def android = subproject.extensions.findByName('android')
-            if (android != null && android.hasProperty('namespace') && !android.namespace) {
-                // Read namespace from AndroidManifest.xml package attribute
-                def manifestFile = new File(subproject.projectDir, 'src/main/AndroidManifest.xml')
-                if (manifestFile.exists()) {
-                    def manifest = new XmlSlurper().parse(manifestFile)
-                    def pkg = manifest.@package?.toString()
-                    if (pkg) {
-                        android.namespace = pkg
+            if (android != null) {
+                // Patch 1: add namespace from AndroidManifest if missing
+                if (android.hasProperty('namespace') && !android.namespace) {
+                    def manifestFile = new File(subproject.projectDir, 'src/main/AndroidManifest.xml')
+                    if (manifestFile.exists()) {
+                        def manifest = new XmlSlurper().parse(manifestFile)
+                        def pkg = manifest.@package?.toString()
+                        if (pkg) android.namespace = pkg
                     }
+                }
+                // Patch 2: enable buildConfig if the package uses it
+                if (android.hasProperty('buildFeatures')) {
+                    android.buildFeatures.buildConfig = true
                 }
             }
         }
