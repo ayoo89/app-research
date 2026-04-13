@@ -112,7 +112,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            // No suffix — keeps applicationId as com.productsearch.app
+            // so 'npm run android' / adb launch works without specifying .debug
         }
         release {
             signingConfig   = signingConfigs.release
