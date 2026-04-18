@@ -72,8 +72,8 @@ import { HealthModule } from './health/health.module';
             sentinels: [{ host: cfg.get('REDIS_SENTINEL_HOST'), port: 26379 }],
             name: cfg.get('REDIS_SENTINEL_NAME', 'mymaster'),
           } : {}),
-          maxRetriesPerRequest: 3,
-          enableReadyCheck: true,
+          maxRetriesPerRequest: null,
+          enableReadyCheck: false,
           lazyConnect: false,
         },
         defaultJobOptions: {

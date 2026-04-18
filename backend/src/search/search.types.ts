@@ -1,13 +1,19 @@
 /**
  * Filtres optionnels (alignés export ERP) :
- * - category ≈ CATEGORIE
- * - family ≈ Famille
+ * - category    ≈ CATEGORIE
+ * - family      ≈ Famille
  * - subcategory ≈ Sous-Famille
+ * - codeGold    ≈ CODE GOLD
+ * - designation ≈ DESIGNATION (nom produit)
+ * - ean         ≈ EAN / code-barres
  */
 export interface ProductSearchFilters {
   category?: string;
   subcategory?: string;
   family?: string;
+  codeGold?: string;
+  designation?: string;
+  ean?: string;
 }
 
 export interface SearchRequest {
@@ -18,15 +24,15 @@ export interface SearchRequest {
   limit?: number;
   /** Override default scoring weights */
   weights?: Partial<ScoringWeights>;
-  /** Catégorie, sous-famille, famille — restreignent les résultats. */
+  /** Taxonomy + ERP field filters */
   filters?: ProductSearchFilters;
 }
 
 export interface ScoringWeights {
-  barcode: number;   // default 1.0
-  text: number;      // default 0.75
-  vector: number;    // default 0.60
-  multiMatchBoost: number; // bonus when same product matches multiple methods, default 0.15
+  barcode: number;          // default 1.0
+  text: number;             // default 0.75
+  vector: number;           // default 0.60
+  multiMatchBoost: number;  // bonus when same product matches multiple methods, default 0.15
 }
 
 export const DEFAULT_WEIGHTS: ScoringWeights = {

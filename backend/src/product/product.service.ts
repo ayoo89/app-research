@@ -5,6 +5,8 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Product } from './product.entity';
 import { SearchService } from '../search/search.service';
+import { TaxonomyService } from '../taxonomy/taxonomy.service';
+import { TaxonomyType } from '../taxonomy/taxonomy.entity';
 
 @Injectable()
 export class ProductService {
@@ -12,6 +14,7 @@ export class ProductService {
     @InjectRepository(Product) private repo: Repository<Product>,
     @InjectQueue('embedding') private embeddingQueue: Queue,
     @Inject(forwardRef(() => SearchService)) private searchService: SearchService,
+    private taxonomyService: TaxonomyService,
   ) {}
 
   findAll(page = 1, limit = 20) {
@@ -20,6 +23,23 @@ export class ProductService {
       take: limit,
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async getDistinctValues(field: 'category' | 'family' | 'subcategory'): Promise<string[]> {
+    const typeMap: Record<string, TaxonomyType> = {
+      category: 'category', family: 'family', subcategory: 'subcategory',
+    };
+    const [rows, taxonomyNames] = await Promise.all([
+      this.repo.createQueryBuilder('p')
+        .select(`DISTINCT p.${field}`, 'value')
+        .where(`p.${field} IS NOT NULL AND p.${field} != ''`)
+        .orderBy('value', 'ASC')
+        .getRawMany(),
+      this.taxonomyService.getNames(typeMap[field]),
+    ]);
+    const fromProducts = rows.map((r: any) => r.value).filter(Boolean) as string[];
+    const merged = Array.from(new Set([...fromProducts, ...taxonomyNames])).sort();
+    return merged;
   }
 
   findById(id: string) {

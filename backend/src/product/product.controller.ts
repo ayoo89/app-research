@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Delete, Param, Body, Query,
-  UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, DefaultValuePipe,
+  UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, DefaultValuePipe, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
@@ -30,13 +30,24 @@ class CreateProductDto {
 export class ProductController {
   constructor(private productService: ProductService) {}
 
+  @Get('distinct/:field')
+  @ApiOperation({ summary: 'List distinct values for category, family, or subcategory' })
+  getDistinct(@Param('field') field: string) {
+    const allowed = ['category', 'family', 'subcategory'] as const;
+    if (!(allowed as readonly string[]).includes(field)) {
+      throw new BadRequestException('Field must be category, family, or subcategory');
+    }
+    return this.productService.getDistinctValues(field as 'category' | 'family' | 'subcategory');
+  }
+
   @Get()
   @ApiOperation({ summary: 'List all products (paginated)' })
-  findAll(
+  async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
-    return this.productService.findAll(page, limit);
+    const [data, total] = await this.productService.findAll(page, limit);
+    return { data, total, page, limit };
   }
 
   @Get(':id')

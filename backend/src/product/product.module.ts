@@ -7,12 +7,14 @@ import { ProductController } from './product.controller';
 import { EmbeddingProcessor } from './embedding.processor';
 import { EmbeddingService } from './embedding.service';
 import { SearchModule } from '../search/search.module';
+import { TaxonomyModule } from '../taxonomy/taxonomy.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Product]),
     BullModule.registerQueue({ name: 'embedding' }),
     forwardRef(() => SearchModule),
+    TaxonomyModule,
   ],
   providers: [ProductService, EmbeddingService, EmbeddingProcessor],
   controllers: [ProductController],

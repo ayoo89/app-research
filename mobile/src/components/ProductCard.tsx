@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import FastImage from 'react-native-fast-image';
+import { Image } from 'expo-image';
 import HighlightText from './HighlightText';
 import MatchBadge from './MatchBadge';
 import { colors, spacing, radius, shadow, typography } from '../theme';
@@ -22,10 +22,11 @@ function ProductCard({ item, query, onPress }: Props) {
       accessibilityLabel={`${item.name}${item.brand ? `, ${item.brand}` : ''}`}
     >
       {item.images?.[0] ? (
-        <FastImage
-          source={{ uri: item.images[0], priority: FastImage.priority.normal }}
+        <Image
+          source={{ uri: item.images[0] }}
           style={styles.thumb}
-          resizeMode={FastImage.resizeMode.cover}
+          contentFit="cover"
+          priority="normal"
         />
       ) : (
         <View style={[styles.thumb, styles.thumbPlaceholder]}>

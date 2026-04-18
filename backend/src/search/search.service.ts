@@ -5,7 +5,7 @@ import Redis from 'ioredis';
 import * as crypto from 'crypto';
 
 import { Product } from '../product/product.entity';
-import { EmbeddingService } from '../product/embedding.service';
+import { EmbeddingService, VectorHit } from '../product/embedding.service';
 import { MetricsService } from '../common/metrics.service';
 import { REDIS_CLIENT } from './cache.module';
 import {
@@ -14,8 +14,9 @@ import {
   ProductSearchFilters,
 } from './search.types';
 
-const CACHE_TTL_TEXT  = 300;    // 5 min
-const CACHE_TTL_EMBED = 3600;   // 1 hr
+const CACHE_TTL_TEXT    = 300;   // 5 min
+const CACHE_TTL_BARCODE = 60;    // 60s — barcode hits are deterministic
+const CACHE_TTL_EMBED   = 3600;  // 1 hr
 const TOP_N           = 50;
 const MAX_SCAN_PAYLOAD = 2048;
 
@@ -64,7 +65,7 @@ export class SearchService {
 
     try {
       ({ results, methods } = await this.runPipeline(req, weights, limit));
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Pipeline error [${correlationId}]: ${err.message}`);
       this.metrics.increment('search_errors_total', { stage: 'pipeline' });
       // Return empty rather than 500 — search should degrade gracefully
@@ -117,12 +118,20 @@ export class SearchService {
 
     // Step 1: Code-barres, QR (URL / GTIN), ou UUID produit — match prioritaire
     if (req.barcode?.trim()) {
-      const t0 = Date.now();
+      const t0        = Date.now();
+      const bcCacheKey = `search:bc:${crypto.createHash('sha256').update(req.barcode.trim() + JSON.stringify(req.filters ?? {})).digest('hex')}`;
+      const cached     = await this.redis.get(bcCacheKey).catch(() => null);
+      if (cached) {
+        const product = JSON.parse(cached) as Product;
+        this.metrics.increment('search_cache_hits_total');
+        return { results: [this.toResult(product, weights.barcode, ['barcode'])], methods: ['barcode'] };
+      }
       const product = await this.resolveScanProduct(req.barcode.trim(), req.filters);
       this.metrics.observe('search_barcode_latency_ms', Date.now() - t0);
       if (product) {
         methods.push('barcode');
         this.metrics.increment('search_barcode_hits_total');
+        this.redis.setex(bcCacheKey, CACHE_TTL_BARCODE, JSON.stringify(product)).catch(() => {});
         return { results: [this.toResult(product, weights.barcode, ['barcode'])], methods };
       }
       this.metrics.increment('search_barcode_misses_total');
@@ -155,9 +164,12 @@ export class SearchService {
     filters?: ProductSearchFilters,
   ): Promise<SearchResult[]> {
     const t0 = Date.now();
-    const fc = filters?.category?.trim().toLowerCase() ?? null;
-    const fs = filters?.subcategory?.trim().toLowerCase() ?? null;
-    const ff = filters?.family?.trim().toLowerCase() ?? null;
+    const fc  = filters?.category?.trim().toLowerCase() ?? null;
+    const fs  = filters?.subcategory?.trim().toLowerCase() ?? null;
+    const ff  = filters?.family?.trim().toLowerCase() ?? null;
+    const fcg = filters?.codeGold?.trim().toLowerCase() ?? null;
+    const fde = filters?.designation?.trim().toLowerCase() ?? null;
+    const fe  = filters?.ean?.trim() ?? null;
     try {
       const rows = await Promise.race([
         this.productRepo.query(
@@ -197,6 +209,9 @@ export class SearchService {
               AND ($3::text IS NULL OR strpos(lower(coalesce(p.category,'')), $3) > 0)
               AND ($4::text IS NULL OR strpos(lower(coalesce(p.subcategory,'')), $4) > 0)
               AND ($5::text IS NULL OR strpos(lower(coalesce(p.family,'')), $5) > 0)
+              AND ($6::text IS NULL OR strpos(lower(coalesce(p."codeGold",'')), $6) > 0)
+              AND ($7::text IS NULL OR strpos(lower(coalesce(p.name,'')), $7) > 0)
+              AND ($8::text IS NULL OR strpos(lower(coalesce(p.barcode,'')), $8) > 0)
           )
           SELECT
             p.id, p.name, p.brand, p."codeGold", p.barcode, p.category, p.subcategory, p.family, p.images,
@@ -206,7 +221,7 @@ export class SearchService {
           ORDER BY combined_text_score DESC
           LIMIT $2
           `,
-          [query, limit, fc, fs, ff],
+          [query, limit, fc, fs, ff, fcg, fde, fe],
         ),
         this.timeout(800, 'text-search'),
       ]);
@@ -218,7 +233,7 @@ export class SearchService {
         const raw = Math.min(parseFloat(row.combined_text_score) || 0, 1);
         return this.toResult(row, raw * weights.text, ['text'], { textScore: raw * weights.text, rawTextRank: raw });
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Text search failed (${Date.now() - t0}ms): ${err.message}`);
       this.metrics.increment('search_errors_total', { stage: 'text' });
       return [];
@@ -263,7 +278,7 @@ export class SearchService {
       } else {
         embedding = await Promise.race([
           this.embeddingService.generateImageEmbedding(imageBase64),
-          this.timeout(5000, 'embedding-generation'),
+          this.timeout<number[]>(5000, 'embedding-generation'),
         ]);
         // Store as raw float32 bytes — 4× smaller than JSON
         const buf = Buffer.from(new Float32Array(embedding).buffer);
@@ -273,7 +288,7 @@ export class SearchService {
 
       const hits = await Promise.race([
         this.embeddingService.vectorSearch(embedding, limit, 0.45),
-        this.timeout(2000, 'vector-search'),
+        this.timeout<VectorHit[]>(2000, 'vector-search'),
       ]);
 
       this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
@@ -351,16 +366,13 @@ export class SearchService {
   private productMatchesFilters(p: Product | Record<string, any>, filters?: ProductSearchFilters): boolean {
     if (!filters) return true;
     const need = (v?: string | null) => v != null && String(v).trim().length > 0;
-    const hay = (v?: string | null) => String(v ?? '').toLowerCase();
-    if (need(filters.category) && !hay(p.category).includes(filters.category!.trim().toLowerCase())) {
-      return false;
-    }
-    if (need(filters.subcategory) && !hay((p as Product).subcategory).includes(filters.subcategory!.trim().toLowerCase())) {
-      return false;
-    }
-    if (need(filters.family) && !hay((p as Product).family).includes(filters.family!.trim().toLowerCase())) {
-      return false;
-    }
+    const hay  = (v?: string | null) => String(v ?? '').toLowerCase();
+    if (need(filters.category)    && !hay(p.category).includes(filters.category!.trim().toLowerCase()))           return false;
+    if (need(filters.subcategory) && !hay((p as any).subcategory).includes(filters.subcategory!.trim().toLowerCase())) return false;
+    if (need(filters.family)      && !hay((p as any).family).includes(filters.family!.trim().toLowerCase()))      return false;
+    if (need(filters.codeGold)    && !hay((p as any).codeGold).includes(filters.codeGold!.trim().toLowerCase()))  return false;
+    if (need(filters.designation) && !hay((p as any).name).includes(filters.designation!.trim().toLowerCase()))   return false;
+    if (need(filters.ean)         && !hay((p as any).barcode).includes(filters.ean!.trim()))                      return false;
     return true;
   }
 

@@ -25,6 +25,9 @@ class ProductFiltersDto {
   @IsOptional() @IsString() category?: string;
   @IsOptional() @IsString() subcategory?: string;
   @IsOptional() @IsString() family?: string;
+  @IsOptional() @IsString() codeGold?: string;
+  @IsOptional() @IsString() designation?: string;
+  @IsOptional() @IsString() ean?: string;
 }
 
 class SearchDto {

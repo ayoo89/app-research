@@ -10,6 +10,14 @@ import LoginScreen from '../screens/LoginScreen';
 import SearchScreen from '../screens/SearchScreen';
 import ScannerScreen from '../screens/ScannerScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import UsersScreen from '../screens/UsersScreen';
+import InviteUserScreen from '../screens/InviteUserScreen';
+import CatalogScreen from '../screens/CatalogScreen';
+import ProductFormScreen from '../screens/ProductFormScreen';
+import ImportExportScreen from '../screens/ImportExportScreen';
+import TaxonomyScreen from '../screens/TaxonomyScreen';
 import { colors, typography, hitSlop } from '../theme';
 
 const Stack = createNativeStackNavigator();
@@ -30,6 +38,7 @@ const styles = StyleSheet.create({
   splashTitle: { ...typography.h2, marginBottom: 8, textAlign: 'center' },
   splashSub:   { ...typography.small, color: colors.textMuted, textAlign: 'center', marginBottom: 24 },
   splashSpinner: { marginTop: 8 },
+  headerBtns:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
   logoutBtn:   { paddingHorizontal: 10, paddingVertical: 6 },
   logoutText:  { color: 'rgba(255,255,255,0.92)', fontSize: 15, fontWeight: '600' },
 });
@@ -40,18 +49,62 @@ export default function AppNavigator() {
   const startMonitoring = useNetworkStore((s) => s.startMonitoring);
 
   const headerRight = useCallback(
-    () => (
-      <TouchableOpacity
-        onPress={logout}
-        style={styles.logoutBtn}
-        hitSlop={hitSlop}
-        accessibilityLabel={t('nav_logoutA11y')}
-        accessibilityRole="button"
-      >
-        <Text style={styles.logoutText}>{t('nav_logout')}</Text>
-      </TouchableOpacity>
+    (navigate: (screen: string) => void) => () => (
+      <View style={styles.headerBtns}>
+        {user?.role === 'super_admin' && (
+          <TouchableOpacity
+            onPress={() => navigate('Users')}
+            style={styles.logoutBtn}
+            hitSlop={hitSlop}
+            accessibilityLabel={t('nav_usersA11y')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutText}>👥</Text>
+          </TouchableOpacity>
+        )}
+        {user?.role === 'super_admin' && (
+          <TouchableOpacity
+            onPress={() => navigate('Taxonomy')}
+            style={styles.logoutBtn}
+            hitSlop={hitSlop}
+            accessibilityLabel={t('nav_taxonomyA11y')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutText}>🗂️</Text>
+          </TouchableOpacity>
+        )}
+        {(user?.role === 'super_admin' || user?.role === 'admin') && (
+          <TouchableOpacity
+            onPress={() => navigate('ImportExport')}
+            style={styles.logoutBtn}
+            hitSlop={hitSlop}
+            accessibilityLabel={t('nav_importExportA11y')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutText}>⬆⬇</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={() => navigate('Profile')}
+          style={styles.logoutBtn}
+          hitSlop={hitSlop}
+          accessibilityLabel={t('nav_profileA11y')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.logoutText}>👤</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={logout}
+          style={styles.logoutBtn}
+          hitSlop={hitSlop}
+          accessibilityLabel={t('nav_logoutA11y')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.logoutText}>{t('nav_logout')}</Text>
+        </TouchableOpacity>
+      </View>
     ),
-    [logout, t],
+    [logout, t, user?.role],
   );
 
   useEffect(() => {
@@ -94,20 +147,27 @@ export default function AppNavigator() {
           }}
         >
           {!user ? (
-            <Stack.Screen
-              name="Login"
-              component={LoginScreen}
-              options={{ headerShown: false }}
-            />
+            <>
+              <Stack.Screen
+                name="Login"
+                component={LoginScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="ForgotPassword"
+                component={ForgotPasswordScreen}
+                options={{ headerShown: false }}
+              />
+            </>
           ) : (
             <>
               <Stack.Screen
                 name="Search"
                 component={SearchScreen}
-                options={{
+                options={({ navigation }) => ({
                   title: t('nav_search'),
-                  headerRight,
-                }}
+                  headerRight: headerRight(navigation.navigate),
+                })}
               />
               <Stack.Screen
                 name="Scanner"
@@ -122,6 +182,41 @@ export default function AppNavigator() {
                 name="ProductDetail"
                 component={ProductDetailScreen}
                 options={{ title: t('nav_productDetail') }}
+              />
+              <Stack.Screen
+                name="Profile"
+                component={ProfileScreen}
+                options={{ title: t('nav_profile') }}
+              />
+              <Stack.Screen
+                name="Catalog"
+                component={CatalogScreen}
+                options={{ title: t('nav_catalog') }}
+              />
+              <Stack.Screen
+                name="Users"
+                component={UsersScreen}
+                options={{ title: t('nav_users') }}
+              />
+              <Stack.Screen
+                name="InviteUser"
+                component={InviteUserScreen}
+                options={{ title: t('users_invite_action') }}
+              />
+              <Stack.Screen
+                name="ProductForm"
+                component={ProductFormScreen}
+                options={{ title: t('product_form_title_create') }}
+              />
+              <Stack.Screen
+                name="ImportExport"
+                component={ImportExportScreen}
+                options={{ title: t('nav_import_export') }}
+              />
+              <Stack.Screen
+                name="Taxonomy"
+                component={TaxonomyScreen}
+                options={{ title: t('nav_taxonomy') }}
               />
             </>
           )}

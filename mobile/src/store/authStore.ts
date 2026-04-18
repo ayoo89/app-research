@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { apiClient, setUnauthenticatedHandler } from '../api/client';
+import { updateProfile as apiUpdateProfile, UpdateProfileData } from '../api/auth';
 
 export interface AuthUser {
   id: string;
@@ -14,6 +15,7 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loadSession: () => Promise<void>;
+  updateProfile: (data: UpdateProfileData) => Promise<void>;
 }
 
 // ── Safe AsyncStorage wrapper ─────────────────────────────────────────────────
@@ -55,14 +57,23 @@ export const useAuthStore = create<AuthState>((set) => {
 
     login: async (email, password) => {
       const { data } = await apiClient.post('/auth/login', { email, password });
-      await storage.setItem('accessToken', data.accessToken);
-      await storage.setItem('tokenExpiry', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      await storage.setItem('accessToken',  data.accessToken);
+      await storage.setItem('refreshToken', data.refreshToken);
+      await storage.setItem('tokenExpiry',  String(Date.now() + 2 * 60 * 60 * 1000));
       set({ user: data.user });
     },
 
     logout: async () => {
-      await storage.multiRemove(['accessToken', 'tokenExpiry']);
+      try { await apiClient.post('/auth/logout'); } catch { /* best-effort */ }
+      await storage.multiRemove(['accessToken', 'refreshToken', 'tokenExpiry']);
       set({ user: null });
+    },
+
+    updateProfile: async (data) => {
+      await apiUpdateProfile(data);
+      if (data.name !== undefined) {
+        set((s) => s.user ? { user: { ...s.user, name: data.name } } : {});
+      }
     },
 
     loadSession: async () => {
@@ -72,7 +83,7 @@ export const useAuthStore = create<AuthState>((set) => {
         const expiry      = Number(pairs[1]?.[1] ?? 0);
 
         if (!accessToken || Date.now() > expiry) {
-          await storage.multiRemove(['accessToken', 'tokenExpiry']);
+          await storage.multiRemove(['accessToken', 'refreshToken', 'tokenExpiry']);
           set({ isLoading: false });
           return;
         }
@@ -82,7 +93,7 @@ export const useAuthStore = create<AuthState>((set) => {
           const { data } = await apiClient.get('/auth/me');
           set({ user: data, isLoading: false });
         } catch {
-          await storage.multiRemove(['accessToken', 'tokenExpiry']);
+          await storage.multiRemove(['accessToken', 'refreshToken', 'tokenExpiry']);
           set({ user: null, isLoading: false });
         } finally {
           clearTimeout(timer);

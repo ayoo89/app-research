@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { User, UserRole } from './user.entity';
 import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
@@ -24,27 +24,18 @@ export class UserService {
   async ensureSuperAdmin(email: string, plainPassword: string): Promise<User> {
     const normalized = email.trim().toLowerCase();
     const hash = await bcrypt.hash(plainPassword, 10);
-    let user = await this.repo.findOne({
-      where: { email: normalized },
-      select: ['id', 'email', 'name', 'role', 'isActive', 'password', 'inviteToken'],
-    });
-    if (!user) {
-      user = this.repo.create({
+    await this.repo.upsert(
+      {
         email: normalized,
         name: 'Super Admin',
         password: hash,
         role: UserRole.SUPER_ADMIN,
         isActive: true,
         inviteToken: null,
-      });
-      return this.repo.save(user);
-    }
-    user.role = UserRole.SUPER_ADMIN;
-    user.password = hash;
-    user.isActive = true;
-    user.inviteToken = null;
-    if (!user.name) user.name = 'Super Admin';
-    return this.repo.save(user);
+      },
+      { conflictPaths: ['email'], skipUpdateIfNoValuesChanged: false },
+    );
+    return this.repo.findOne({ where: { email: normalized } });
   }
 
   /**
@@ -60,9 +51,7 @@ export class UserService {
     if (normalized === SUPER_ADMIN_EMAIL.trim().toLowerCase()) {
       throw new BadRequestException('Cet e-mail est réservé au compte super administrateur');
     }
-    if (plainPassword.length < 8) {
-      throw new BadRequestException('Le mot de passe doit contenir au moins 8 caractères');
-    }
+    UserService.validatePasswordComplexity(plainPassword);
     if (role === UserRole.SUPER_ADMIN) {
       throw new BadRequestException('Impossible de créer un second super administrateur via l’API');
     }
@@ -76,7 +65,14 @@ export class UserService {
       isActive: true,
       inviteToken: null,
     });
-    return this.repo.save(user);
+    try {
+      return await this.repo.save(user);
+    } catch (err: any) {
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        throw new ConflictException('Cet e-mail est déjà utilisé');
+      }
+      throw err;
+    }
   }
 
   findById(id: string) {
@@ -116,5 +112,78 @@ export class UserService {
 
   async remove(id: string) {
     await this.repo.delete(id);
+  }
+
+  async updateProfile(
+    id: string,
+    data: { name?: string; currentPassword?: string; newPassword?: string },
+  ): Promise<Omit<User, 'password' | 'inviteToken'>> {
+    const user = await this.repo.findOne({
+      where: { id },
+      select: ['id', 'email', 'name', 'role', 'isActive', 'password', 'inviteToken', 'createdAt', 'updatedAt'],
+    });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+
+    if (data.name !== undefined) {
+      const trimmed = data.name.trim();
+      if (trimmed) user.name = trimmed;
+    }
+
+    if (data.newPassword) {
+      if (!data.currentPassword) throw new BadRequestException('Mot de passe actuel requis');
+      UserService.validatePasswordComplexity(data.newPassword);
+      const valid = await bcrypt.compare(data.currentPassword, user.password ?? '');
+      if (!valid) throw new UnauthorizedException('Mot de passe actuel incorrect');
+      user.password = await bcrypt.hash(data.newPassword, 10);
+    }
+
+    const saved = await this.repo.save(user);
+    const { password, inviteToken, ...safe } = saved as any;
+    return safe;
+  }
+
+  static validatePasswordComplexity(password: string): void {
+    if (password.length < 8)           throw new BadRequestException('Le mot de passe doit contenir au moins 8 caractères');
+    if (!/[A-Z]/.test(password))       throw new BadRequestException('Le mot de passe doit contenir au moins une majuscule');
+    if (!/[0-9]/.test(password))       throw new BadRequestException('Le mot de passe doit contenir au moins un chiffre');
+  }
+
+  async storeRefreshToken(id: string, hash: string): Promise<void> {
+    await this.repo.update(id, { refreshTokenHash: hash } as any);
+  }
+
+  async clearRefreshToken(id: string): Promise<void> {
+    await this.repo.update(id, { refreshTokenHash: null } as any);
+  }
+
+  findByRefreshTokenHash(hash: string) {
+    return this.repo.findOne({
+      where: { refreshTokenHash: hash } as any,
+      select: ['id', 'email', 'name', 'role', 'isActive'],
+    });
+  }
+
+  generateTempPassword(): string {
+    const upper  = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+    const lower  = 'abcdefghjkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const all    = upper + lower + digits;
+    const rand   = (pool: string) => pool[Math.floor(Math.random() * pool.length)];
+    const chars  = [rand(upper), rand(digits), ...Array.from({ length: 10 }, () => rand(all))];
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+  }
+
+  async resetPasswordById(id: string): Promise<string> {
+    const user = await this.repo.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    const tempPwd = this.generateTempPassword();
+    user.password = await bcrypt.hash(tempPwd, 10);
+    user.isActive = true;
+    await this.repo.save(user);
+    return tempPwd;
   }
 }

@@ -1,53 +1,89 @@
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 /**
- * API base URL — set API_URL env var or edit this directly for your setup.
- *
- * Android emulator  → 10.0.2.2  (maps to host machine localhost)
- * iOS simulator     → localhost
- * Physical device   → your machine's LAN IP (e.g. 192.168.x.x)
+ * Set EXPO_PUBLIC_API_URL in mobile/.env to override.
+ * Android emulator → http://10.0.2.2:3000/api/v1
+ * iOS simulator    → http://localhost:3000/api/v1
+ * Physical device  → http://<your-lan-ip>:3000/api/v1
  */
-const DEV_URL = Platform.OS === 'android'
-  ? 'http://10.0.2.2:3000/api/v1'
-  : 'http://localhost:3000/api/v1';
-
-export const BASE_URL: string = (process.env.API_URL as string) ?? DEV_URL;
+const DEV_URL = 'http://192.168.1.89:3000/api/v1';
+export const BASE_URL: string = (process.env.EXPO_PUBLIC_API_URL as string) ?? DEV_URL;
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 8000,  // 8s — fast enough for real devices, avoids white screen hang
+  timeout: 8000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Lazy ref — avoids circular dependency between authStore ↔ apiClient
 let _onUnauthenticated: (() => void) | null = null;
 export function setUnauthenticatedHandler(fn: () => void) {
   _onUnauthenticated = fn;
 }
 
-// Attach JWT to every request
+// ── Request: attach JWT ───────────────────────────────────────────
 apiClient.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('accessToken');
+  const token = await AsyncStorage.getItem('accessToken').catch(() => null);
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// Normalise errors + handle 401
+// ── Response: auto-refresh on 401, normalise errors ──────────────
+let isRefreshing = false;
+let refreshQueue: Array<(token: string | null) => void> = [];
+
+function drainQueue(token: string | null) {
+  refreshQueue.forEach((cb) => cb(token));
+  refreshQueue = [];
+}
+
 apiClient.interceptors.response.use(
   (res) => res,
   async (err: AxiosError) => {
-    if (err.response?.status === 401) {
-      await AsyncStorage.multiRemove(['accessToken', 'tokenExpiry']);
-      _onUnauthenticated?.();
+    const original = err.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    if (err.response?.status === 401 && original && !original._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) =>
+          refreshQueue.push((token) => {
+            if (!token) { reject(err); return; }
+            original.headers.Authorization = `Bearer ${token}`;
+            resolve(apiClient(original));
+          }),
+        );
+      }
+
+      original._retry = true;
+      isRefreshing    = true;
+
+      try {
+        const refreshToken = await AsyncStorage.getItem('refreshToken').catch(() => null);
+        if (!refreshToken) throw new Error('no_refresh_token');
+
+        const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
+        await AsyncStorage.multiSet([
+          ['accessToken',  data.accessToken],
+          ['refreshToken', data.refreshToken],
+          ['tokenExpiry',  String(Date.now() + 2 * 60 * 60 * 1000)],
+        ]).catch(() => {});
+
+        drainQueue(data.accessToken);
+        original.headers.Authorization = `Bearer ${data.accessToken}`;
+        return apiClient(original);
+      } catch {
+        drainQueue(null);
+        await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'tokenExpiry']).catch(() => {});
+        _onUnauthenticated?.();
+      } finally {
+        isRefreshing = false;
+      }
     }
 
     const raw = (err.response?.data as any)?.message;
     const message =
       raw ??
-      (err.code === 'ECONNABORTED' ? 'Request timed out' : null) ??
-      (err.message === 'Network Error' ? 'No internet connection' : null) ??
+      (err.code === 'ECONNABORTED'     ? 'Request timed out'      : null) ??
+      (err.message === 'Network Error' ? 'No internet connection'  : null) ??
       'Something went wrong';
 
     err.message = Array.isArray(message) ? message[0] : message;

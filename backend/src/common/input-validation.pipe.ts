@@ -41,7 +41,7 @@ export class SearchInputPipe implements PipeTransform {
         throw new BadRequestException('filters must be an object');
       }
       const next: Record<string, string> = {};
-      for (const key of ['category', 'subcategory', 'family'] as const) {
+      for (const key of ['category', 'subcategory', 'family', 'codeGold', 'designation', 'ean'] as const) {
         const v = value.filters[key];
         if (v === undefined || v === null) continue;
         if (typeof v !== 'string') throw new BadRequestException(`filters.${key} must be a string`);

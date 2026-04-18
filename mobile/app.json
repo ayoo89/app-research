@@ -1,4 +1,75 @@
 {
-  "name": "ProductSearchApp",
-  "displayName": "ProductSearch"
+  "expo": {
+    "name": "ProductSearch",
+    "slug": "product-search-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "jsEngine": "hermes",
+      "supportsTablet": false,
+      "bundleIdentifier": "com.productsearch.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow ProductSearch to access your camera for barcode scanning.",
+        "NSPhotoLibraryUsageDescription": "Allow ProductSearch to access your photo library for image search."
+      }
+    },
+    "android": {
+      "jsEngine": "hermes",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.productsearch.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.VIBRATE",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ProductSearch to access your camera for barcode scanning."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ProductSearch to access your photo library for image search."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          },
+          "ios": {
+            "deploymentTarget": "13.4"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6b906e5b-da20-4f45-a164-423a3c816917"
+      }
+    }
+  }
 }

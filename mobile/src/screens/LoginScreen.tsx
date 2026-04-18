@@ -5,6 +5,8 @@ import {
   TouchableOpacity, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../store/authStore';
 import { useI18n } from '../i18n';
 import Button from '../components/Button';
@@ -12,6 +14,7 @@ import { colors, spacing, radius, typography, shadow } from '../theme';
 
 export default function LoginScreen() {
   const { t } = useI18n();
+  const navigation = useNavigation<any>();
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -36,11 +39,13 @@ export default function LoginScreen() {
     if (!trimmedEmail || !password) {
       setError(t('login_error_fill'));
       shake();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
     if (!trimmedEmail.includes('@')) {
       setError(t('login_error_email'));
       shake();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
 
@@ -52,6 +57,7 @@ export default function LoginScreen() {
       const msg = e.message ?? t('login_error_generic');
       setError(msg);
       shake();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
     }
@@ -108,14 +114,10 @@ export default function LoginScreen() {
             />
 
             <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>{t('login_password')}</Text>
-            <View style={styles.passwordRow}>
+            <View style={[styles.passwordRow, focused === 'password' && styles.inputFocused]}>
               <TextInput
                 ref={passwordRef}
-                style={[
-                  styles.input,
-                  styles.passwordInput,
-                  focused === 'password' && styles.inputFocused,
-                ]}
+                style={styles.passwordInput}
                 placeholder="••••••••"
                 placeholderTextColor={colors.placeholder}
                 secureTextEntry={!showPass}
@@ -132,6 +134,8 @@ export default function LoginScreen() {
                 style={styles.eyeBtn}
                 onPress={() => setShowPass((v) => !v)}
                 accessibilityLabel={showPass ? t('login_passToggleHide') : t('login_passToggleShow')}
+                accessibilityRole="button"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.eyeIcon}>{showPass ? '🙈' : '👁️'}</Text>
               </TouchableOpacity>
@@ -143,6 +147,14 @@ export default function LoginScreen() {
               loading={loading}
               style={styles.loginBtn}
             />
+
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ForgotPassword')}
+              style={styles.forgotLink}
+              accessibilityRole="button"
+            >
+              <Text style={styles.forgotText}>{t('forgot_link')}</Text>
+            </TouchableOpacity>
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -187,12 +199,18 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  passwordRow:  { position: 'relative' },
-  passwordInput: { paddingRight: 48 },
-  eyeBtn: {
-    position: 'absolute', right: spacing.md,
-    top: 0, bottom: 0, justifyContent: 'center',
+  passwordRow: {
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
   },
+  passwordInput: {
+    flex: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    fontSize: 15, color: colors.text,
+  },
+  eyeBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   eyeIcon:      { fontSize: 18 },
-  loginBtn:     { marginTop: spacing.xl },
+  loginBtn:   { marginTop: spacing.xl },
+  forgotLink: { alignItems: 'center', marginTop: spacing.lg },
+  forgotText: { ...typography.small, color: colors.primary, fontWeight: '600' },
 });

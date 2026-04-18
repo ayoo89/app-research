@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException, HttpException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { ProductService } from '../product/product.service';
@@ -29,20 +29,36 @@ export class AdminService {
     if (email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.trim().toLowerCase()) {
       throw new BadRequestException('Cet e-mail est réservé au super administrateur');
     }
-    const user = await this.userService.create(email, name, role);
-    await this.sendInviteEmail(email, name, user.inviteToken);
-    return { message: 'Invite sent', userId: user.id };
+    try {
+      const tempPassword = this.userService.generateTempPassword();
+      const user = await this.userService.createUserWithPassword(email, name, role, tempPassword);
+      // Fire-and-forget — never block or fail the invite on email errors
+      this.sendCredentialsEmail(email, name, tempPassword).catch((err) =>
+        this.logger.error(`Email error for ${email}: ${err?.message}`),
+      );
+      return { message: "Invitation envoyée avec succès", userId: user.id };
+    } catch (err: any) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error(`inviteUser unexpected error: ${err?.message}`, err?.stack);
+      throw new BadRequestException(err?.message ?? "Échec de l'invitation");
+    }
   }
 
-  async createUserWithPassword(
-    email: string,
-    name: string,
-    role: UserRole,
-    password: string,
-  ) {
+  async createUserWithPassword(email: string, name: string, role: UserRole, password: string) {
     const user = await this.userService.createUserWithPassword(email, name, role, password);
     const { password: _p, inviteToken: _i, ...safe } = user as any;
     return { message: 'Utilisateur créé', user: safe };
+  }
+
+  async resetUserPassword(id: string): Promise<{ message: string }> {
+    const user = await this.userService.findById(id);
+    if (!user) throw new BadRequestException('Utilisateur introuvable');
+    if (user.email.toLowerCase() === SUPER_ADMIN_EMAIL.trim().toLowerCase()) {
+      throw new ForbiddenException('Impossible de réinitialiser le mot de passe du super administrateur');
+    }
+    const tempPassword = await this.userService.resetPasswordById(id);
+    await this.sendPasswordResetEmail(user.email, user.name ?? user.email, tempPassword);
+    return { message: "Mot de passe réinitialisé et envoyé à l'utilisateur" };
   }
 
   async updateUser(id: string, data: any) {
@@ -67,7 +83,7 @@ export class AdminService {
     return this.userService.remove(id);
   }
 
-  // ── Product Import ────────────────────────────────────────────────
+  // ── Product Import / Export ───────────────────────────────────────
 
   async importFromCsv(buffer: Buffer): Promise<{ imported: number; errors: string[] }> {
     const products: any[] = [];
@@ -95,24 +111,82 @@ export class AdminService {
     return { imported: products.length, errors };
   }
 
+  async exportToCsv(): Promise<string> {
+    const [items] = await this.productService.findAll(1, 100_000);
+    const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = 'code_gold,designation,ean,marque,categorie,famille,sous_famille,description';
+    const rows = items.map((p: any) => [
+      p.codeGold, p.name, p.barcode, p.brand,
+      p.category, p.family, p.subcategory, p.description,
+    ].map(escape).join(','));
+    return [header, ...rows].join('\n');
+  }
+
   // ── Email ─────────────────────────────────────────────────────────
 
-  private async sendInviteEmail(email: string, name: string, token: string) {
-    const transporter = nodemailer.createTransport({
+  private createTransporter() {
+    return nodemailer.createTransport({
       host: this.config.get('SMTP_HOST'),
-      port: this.config.get<number>('SMTP_PORT'),
+      port: this.config.get<number>('SMTP_PORT', 587),
       auth: { user: this.config.get('SMTP_USER'), pass: this.config.get('SMTP_PASS') },
     });
+  }
 
-    const inviteUrl = `${this.config.get('APP_URL', 'http://localhost:3000')}/accept-invite?token=${token}`;
+  private async sendCredentialsEmail(email: string, name: string, tempPassword: string): Promise<boolean> {
+    if (!this.config.get('SMTP_HOST')) {
+      this.logger.warn(`SMTP_HOST not configured — skipping credentials email to ${email}`);
+      return false;
+    }
+    try {
+      const appUrl = this.config.get('APP_URL', 'http://localhost:3000');
+      await this.createTransporter().sendMail({
+        from: this.config.get('SMTP_USER'),
+        to: email,
+        subject: 'Bienvenue — Vos identifiants de connexion',
+        html: `
+          <p>Bonjour ${name},</p>
+          <p>Votre compte a été créé. Voici vos identifiants :</p>
+          <ul>
+            <li><strong>E-mail :</strong> ${email}</li>
+            <li><strong>Mot de passe temporaire :</strong> <code>${tempPassword}</code></li>
+          </ul>
+          <p>Connectez-vous sur <a href="${appUrl}">${appUrl}</a> et changez votre mot de passe dès la première connexion via votre profil.</p>
+        `,
+      });
+      this.logger.log(`Credentials email sent to ${email}`);
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Failed to send credentials email to ${email}: ${err.message}`);
+      return false;
+    }
+  }
 
-    await transporter.sendMail({
-      from: this.config.get('SMTP_USER'),
-      to: email,
-      subject: 'You have been invited',
-      html: `<p>Hi ${name},</p><p>Click <a href="${inviteUrl}">here</a> to set your password and activate your account.</p>`,
-    });
-
-    this.logger.log(`Invite email sent to ${email}`);
+  private async sendPasswordResetEmail(email: string, name: string, tempPassword: string): Promise<boolean> {
+    if (!this.config.get('SMTP_HOST')) {
+      this.logger.warn(`SMTP_HOST not configured — skipping password reset email to ${email}`);
+      return false;
+    }
+    try {
+      const appUrl = this.config.get('APP_URL', 'http://localhost:3000');
+      await this.createTransporter().sendMail({
+        from: this.config.get('SMTP_USER'),
+        to: email,
+        subject: 'Réinitialisation de votre mot de passe',
+        html: `
+          <p>Bonjour ${name},</p>
+          <p>Votre mot de passe a été réinitialisé par l'administrateur. Voici vos nouveaux identifiants :</p>
+          <ul>
+            <li><strong>E-mail :</strong> ${email}</li>
+            <li><strong>Mot de passe temporaire :</strong> <code>${tempPassword}</code></li>
+          </ul>
+          <p>Connectez-vous sur <a href="${appUrl}">${appUrl}</a> et modifiez votre mot de passe via votre profil.</p>
+        `,
+      });
+      this.logger.log(`Password reset email sent to ${email}`);
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Failed to send password reset email to ${email}: ${err.message}`);
+      return false;
+    }
   }
 }

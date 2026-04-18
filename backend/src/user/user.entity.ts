@@ -32,6 +32,9 @@ export class User {
   @Column({ nullable: true })
   inviteToken: string;
 
+  @Column({ nullable: true, select: false })
+  refreshTokenHash: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

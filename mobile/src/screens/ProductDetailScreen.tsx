@@ -5,7 +5,7 @@ import {
   NativeSyntheticEvent, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import FastImage from 'react-native-fast-image';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import { getProduct, Product } from '../api/search';
 import { useI18n } from '../i18n';
@@ -16,7 +16,7 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 export default function ProductDetailScreen({ route }: any) {
   const { t } = useI18n();
-  const { id, fromScan } = route.params as { id: string; fromScan?: boolean };
+  const { id } = route.params as { id: string; fromScan?: boolean };
   const navigation = useNavigation<any>();
 
   const [product,  setProduct]  = useState<Product | null>(null);
@@ -46,8 +46,6 @@ export default function ProductDetailScreen({ route }: any) {
     setImgIndex(idx);
   };
 
-  // ── Loading ───────────────────────────────────────────────────────
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -56,8 +54,6 @@ export default function ProductDetailScreen({ route }: any) {
       </View>
     );
   }
-
-  // ── Error ─────────────────────────────────────────────────────────
 
   if (error || !product) {
     return (
@@ -82,7 +78,6 @@ export default function ProductDetailScreen({ route }: any) {
         showsVerticalScrollIndicator={false}
         bounces
       >
-        {/* Image carousel */}
         {images.length > 0 ? (
           <View style={styles.carouselWrap}>
             <FlatList
@@ -94,10 +89,11 @@ export default function ProductDetailScreen({ route }: any) {
               onScroll={onImageScroll}
               scrollEventThrottle={16}
               renderItem={({ item }) => (
-                <FastImage
-                  source={{ uri: item, priority: FastImage.priority.high }}
+                <Image
+                  source={{ uri: item }}
                   style={styles.image}
-                  resizeMode={FastImage.resizeMode.cover}
+                  contentFit="cover"
+                  priority="high"
                 />
               )}
             />
@@ -118,33 +114,27 @@ export default function ProductDetailScreen({ route }: any) {
           </View>
         )}
 
-        {/* Content */}
         <View style={styles.content}>
-
-          {/* Category pill */}
           {product.category ? (
             <View style={styles.categoryPill}>
               <Text style={styles.categoryText}>{product.category}</Text>
             </View>
           ) : null}
 
-          {/* Name */}
           <Text style={styles.name}>{product.name}</Text>
 
-          {/* Brand */}
           {product.brand ? (
             <Text style={styles.brand}>{product.brand}</Text>
           ) : null}
 
-          {/* Key info row */}
           <View style={[styles.infoCard, shadow.sm]}>
             {(() => {
               const rows: { icon: string; label: string; value: string }[] = [];
-              if (product.barcode) rows.push({ icon: '⬛', label: t('product_label_ean'), value: product.barcode });
-              if (product.codeGold) rows.push({ icon: '🔢', label: t('product_label_gold'), value: product.codeGold });
-              if (product.brand) rows.push({ icon: '🏷️', label: t('product_label_brand'), value: product.brand });
-              if (product.category) rows.push({ icon: '📂', label: t('product_label_category'), value: product.category });
-              if (product.family) rows.push({ icon: '👪', label: t('product_label_family'), value: product.family });
+              if (product.barcode)    rows.push({ icon: '⬛', label: t('product_label_ean'),      value: product.barcode });
+              if (product.codeGold)   rows.push({ icon: '🔢', label: t('product_label_gold'),     value: product.codeGold });
+              if (product.brand)      rows.push({ icon: '🏷️', label: t('product_label_brand'),    value: product.brand });
+              if (product.category)   rows.push({ icon: '📂', label: t('product_label_category'), value: product.category });
+              if (product.family)     rows.push({ icon: '👪', label: t('product_label_family'),   value: product.family });
               if (product.subcategory) rows.push({ icon: '📁', label: t('product_label_subfamily'), value: product.subcategory });
               return rows.map((row, i) => (
                 <InfoRow
@@ -158,7 +148,6 @@ export default function ProductDetailScreen({ route }: any) {
             })()}
           </View>
 
-          {/* Description */}
           {product.description ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t('product_section_desc')}</Text>
@@ -166,14 +155,12 @@ export default function ProductDetailScreen({ route }: any) {
             </View>
           ) : null}
 
-          {/* No description fallback */}
           {!product.description && !product.brand && !product.barcode ? (
             <Text style={styles.noData}>{t('product_noData')}</Text>
           ) : null}
         </View>
       </ScrollView>
 
-      {/* Search similar button */}
       <SafeAreaView style={styles.footer} edges={['bottom']}>
         <TouchableOpacity
           style={styles.searchSimilarBtn}
@@ -208,8 +195,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   loadingText:     { ...typography.small, color: colors.textMuted, marginTop: spacing.md },
-
-  // Carousel
   carouselWrap:    { position: 'relative' },
   image:           { width: SCREEN_W, height: 300 },
   imagePlaceholder: {
@@ -227,8 +212,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.5)',
   },
   dotActive: { backgroundColor: '#fff', width: 18 },
-
-  // Content
   content:         { padding: spacing.xl },
   categoryPill: {
     alignSelf: 'flex-start', backgroundColor: colors.primaryLight,
@@ -238,8 +221,6 @@ const styles = StyleSheet.create({
   categoryText:    { ...typography.caption, color: colors.primary, fontWeight: '600' },
   name:            { ...typography.h2, lineHeight: 30, marginBottom: spacing.xs },
   brand:           { ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg },
-
-  // Info card
   infoCard: {
     backgroundColor: colors.surface, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.border,
@@ -251,14 +232,10 @@ const styles = StyleSheet.create({
   infoContent:     { flex: 1 },
   infoLabel:       { ...typography.label, marginBottom: 2 },
   infoValue:       { ...typography.body, color: colors.text },
-
-  // Description
   section:         { marginBottom: spacing.xl },
   sectionTitle:    { ...typography.label, marginBottom: spacing.sm },
   description:     { ...typography.body, lineHeight: 24, color: colors.textSecondary },
   noData:          { ...typography.small, color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
-
-  // Footer
   footer:          { backgroundColor: colors.surface, paddingHorizontal: spacing.xl, paddingTop: spacing.md },
   searchSimilarBtn: {
     backgroundColor: colors.primaryLight, borderRadius: radius.md,

@@ -63,10 +63,10 @@ export class EmbeddingProcessor {
       embeddingVector: embedding,
       embeddingGenerated: true,
       metadata: {
-        ...(typeof product.metadata === 'object' && product.metadata !== null ? product.metadata : {}),
+        ...(typeof product.metadata === 'object' && product.metadata !== null ? product.metadata as object : {}),
         embeddingVersion,
         embeddingGeneratedAt: new Date().toISOString(),
-      },
+      } as any,
     });
 
     await this.embeddingService.indexProduct(productId, embedding, {
