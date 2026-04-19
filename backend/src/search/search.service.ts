@@ -290,24 +290,25 @@ export class SearchService {
       }
 
       // Cosine similarity via dot product of L2-normalised vectors (no pgvector extension needed).
-      // Both product embeddings and query embeddings are L2-normalised at generation time,
-      // so dot-product == cosine similarity.
-      const vectorStr = `{${embedding.join(',')}}`;
+      // Embed the query vector inline to avoid parameter type-inference issues with float arrays.
+      // Safe: embedding values are always finite floats produced by our own CLIP service.
+      const safeVec = embedding.map((v) => (Number.isFinite(v) ? v : 0));
+      const vecLiteral = `ARRAY[${safeVec.join(',')}]::float8[]`;
       const rows = await Promise.race([
         this.productRepo.query(
           `SELECT p.id, p.name, p.brand, p."codeGold", p.barcode,
                   p.category, p.subcategory, p.family, p.images,
                   (SELECT COALESCE(SUM(pv * qv), 0)
-                   FROM UNNEST(p."embeddingVector", $1::float8[]) AS t(pv, qv)) AS vector_score
+                   FROM UNNEST(p."embeddingVector", ${vecLiteral}) AS t(pv, qv)) AS vector_score
            FROM products p
            WHERE p."embeddingVector" IS NOT NULL
              AND array_length(p."embeddingVector", 1) = 512
            ORDER BY (SELECT COALESCE(SUM(pv * qv), 0)
-                     FROM UNNEST(p."embeddingVector", $1::float8[]) AS t(pv, qv)) DESC NULLS LAST
-           LIMIT $2`,
-          [vectorStr, limit * 3],
+                     FROM UNNEST(p."embeddingVector", ${vecLiteral}) AS t(pv, qv)) DESC NULLS LAST
+           LIMIT $1`,
+          [limit * 3],
         ),
-        this.timeout<any[]>(3000, 'vector-search'),
+        this.timeout<any[]>(4000, 'vector-search'),
       ]);
 
       this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
