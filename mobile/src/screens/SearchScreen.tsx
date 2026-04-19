@@ -228,7 +228,6 @@ export default function SearchScreen() {
 
   const ListHeader = () => (
     <>
-      {error ? <ErrorBanner message={error} onRetry={retryLastSearch} /> : null}
       {phase === 'done' && results.length > 0 && meta ? (
         <View style={styles.metaRow}>
           <Text style={styles.metaText}>
@@ -435,6 +434,8 @@ export default function SearchScreen() {
           </>
         ) : null}
       </View>
+
+      {error ? <ErrorBanner message={error} onRetry={retryLastSearch} /> : null}
 
       {phase === 'searching' && (
         <View style={styles.searchingBanner}>
