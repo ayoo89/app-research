@@ -56,10 +56,20 @@ async def lifespan(app: FastAPI):
     logger.info("Loading models…")
     text_model  = SentenceTransformer(TEXT_MODEL_NAME)
     image_model = SentenceTransformer(IMAGE_MODEL_NAME)
-    logger.info("Connecting to Elasticsearch and Redis…")
+    logger.info("Models loaded. Connecting to Elasticsearch and Redis…")
     es    = Elasticsearch(ES_URL, request_timeout=10)
-    cache = redis.from_url(REDIS_URL, decode_responses=False)
-    _ensure_index()
+    try:
+        cache = redis.from_url(REDIS_URL, decode_responses=False)
+        cache.ping()
+        logger.info("Redis connected ✓")
+    except Exception as exc:
+        logger.warning(f"Redis unavailable at startup (will retry on requests): {exc}")
+        cache = None
+    try:
+        _ensure_index()
+        logger.info("Elasticsearch index ready ✓")
+    except Exception as exc:
+        logger.warning(f"Elasticsearch unavailable at startup (will retry on requests): {exc}")
     logger.info("Embedding service ready ✓")
     yield
     logger.info("Shutting down")
@@ -167,6 +177,8 @@ def _cache_key(prefix: str, payload: str) -> str:
     return f"emb:{prefix}:{h}"
 
 def _get_cached_embed(key: str) -> list[float] | None:
+    if cache is None:
+        return None
     try:
         raw = cache.get(key)
         if raw:
@@ -176,6 +188,8 @@ def _get_cached_embed(key: str) -> list[float] | None:
     return None
 
 def _set_cached_embed(key: str, vec: np.ndarray):
+    if cache is None:
+        return
     try:
         cache.setex(key, EMBED_CACHE_TTL, vec.astype(np.float32).tobytes())
     except Exception:
