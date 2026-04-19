@@ -118,8 +118,8 @@ export class ProductService {
     return saved;
   }
 
-  /** Upsert by codeGold: update if exists, create if not. */
-  async bulkUpsert(products: Partial<Product>[]): Promise<Product[]> {
+  /** Upsert by codeGold: update if exists, create if not. Returns all affected rows. */
+  async bulkUpsert(products: Partial<Product>[]): Promise<Array<{ id: string; codeGold: string | null; name: string }>> {
     const codeGolds = products.map((p) => p.codeGold).filter(Boolean) as string[];
     const existing = codeGolds.length > 0
       ? await this.repo.find({ where: { codeGold: In(codeGolds) }, select: ['id', 'codeGold'] })
@@ -138,19 +138,20 @@ export class ProductService {
       }
     }
 
-    const results: Product[] = [];
+    const results: Array<{ id: string; codeGold: string | null; name: string }> = [];
 
     if (toCreate.length > 0) {
       const created = await this.repo.save(this.repo.create(toCreate as Product[]));
       for (const p of created) {
         await this.embeddingQueue.add('generate', { productId: p.id });
+        results.push({ id: p.id, codeGold: p.codeGold ?? null, name: p.name });
       }
-      results.push(...created);
     }
 
     for (const { id, data } of toUpdate) {
       await this.repo.update(id, data);
       await this.embeddingQueue.add('generate', { productId: id });
+      results.push({ id, codeGold: data.codeGold ?? null, name: data.name ?? '' });
     }
 
     return results;

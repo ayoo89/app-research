@@ -1,9 +1,9 @@
 import {
   Controller, Get, Post, Put, Delete, Param, Body, Query,
-  UseGuards, UseInterceptors, UploadedFile, Res,
+  UseGuards, UseInterceptors, UploadedFiles, UploadedFile, Res, BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -122,9 +122,15 @@ export class AdminController {
 
   @Post('products/import/csv')
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Import products from CSV file' })
-  @UseInterceptors(FileInterceptor('file'))
-  importCsv(@UploadedFile() file: Express.Multer.File) {
-    return this.adminService.importFromCsv(file.buffer);
+  @ApiOperation({ summary: 'Import products from CSV/Excel file with optional product images' })
+  @UseInterceptors(FileFieldsInterceptor(
+    [{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 200 }],
+    { limits: { fileSize: 10 * 1024 * 1024 } },
+  ))
+  importCsv(
+    @UploadedFiles() files: { file?: Express.Multer.File[]; images?: Express.Multer.File[] },
+  ) {
+    if (!files?.file?.[0]) throw new BadRequestException('No product file uploaded');
+    return this.adminService.importFromFile(files.file[0], files.images ?? []);
   }
 }

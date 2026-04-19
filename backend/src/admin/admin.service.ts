@@ -7,6 +7,9 @@ import { UserRole } from '../user/user.entity';
 import * as nodemailer from 'nodemailer';
 import * as csv from 'csv-parser';
 import { Readable } from 'stream';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as XLSX from 'xlsx';
 import { mapCsvRowToProduct } from './csv-row.mapper';
 import { SUPER_ADMIN_EMAIL } from '../auth/super-admin.constants';
 
@@ -87,28 +90,112 @@ export class AdminService {
 
   // ── Product Import / Export ───────────────────────────────────────
 
-  async importFromCsv(buffer: Buffer): Promise<{ imported: number; errors: string[] }> {
-    const products: any[] = [];
+  /** Parse CSV buffer into product rows */
+  private async parseCsvBuffer(buffer: Buffer): Promise<{ rows: any[]; errors: string[] }> {
+    const rows: any[] = [];
     const errors: string[] = [];
-
     await new Promise<void>((resolve, reject) => {
       Readable.from(buffer)
         .pipe(csv())
         .on('data', (row: Record<string, unknown>) => {
           const mapped = mapCsvRowToProduct(row);
           if (!mapped) {
-            errors.push(`Ligne sans désignation (DESIGNATION / name): ${JSON.stringify(row)}`);
-            return;
+            errors.push(`Row missing designation: ${JSON.stringify(row)}`);
+          } else {
+            rows.push(mapped);
           }
-          products.push(mapped);
         })
         .on('end', resolve)
         .on('error', reject);
     });
+    return { rows, errors };
+  }
 
-    if (products.length === 0) return { imported: 0, errors };
+  /** Parse XLSX/XLS buffer into product rows */
+  private parseXlsxBuffer(buffer: Buffer): { rows: any[]; errors: string[] } {
+    const errors: string[] = [];
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+    const rows = rawRows
+      .map((row) => {
+        const mapped = mapCsvRowToProduct(row);
+        if (!mapped) errors.push(`Row missing designation: ${JSON.stringify(row)}`);
+        return mapped;
+      })
+      .filter(Boolean);
+    return { rows, errors };
+  }
 
-    // Auto-create taxonomy entries that don't exist yet
+  /** Detect XLSX by PK magic bytes (xlsx is a ZIP) */
+  private isXlsx(buffer: Buffer): boolean {
+    return buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4B;
+  }
+
+  /** Save image files and match them to products by codeGold filename stem */
+  private async saveAndMatchImages(
+    imageFiles: Express.Multer.File[],
+    products: Array<{ id: string; codeGold?: string | null; name?: string }>,
+  ): Promise<{ uploaded: number; matched: number }> {
+    if (!imageFiles.length) return { uploaded: 0, matched: 0 };
+
+    const publicDir = path.join(process.cwd(), 'public', 'products');
+    fs.mkdirSync(publicDir, { recursive: true });
+
+    const imageBase = this.config
+      .get<string>('IMAGE_BASE_URL', 'https://productsearch-api.onrender.com')
+      .replace(/\/$/, '');
+
+    let matched = 0;
+
+    for (const imgFile of imageFiles) {
+      // Sanitize filename — keep alphanumerics, dots, dashes, underscores, parens
+      const safeName = imgFile.originalname.replace(/[^a-zA-Z0-9.\-_() ]/g, '_');
+      const savePath = path.join(publicDir, safeName);
+      fs.writeFileSync(savePath, imgFile.buffer);
+
+      const imageUrl = `${imageBase}/uploads/products/${encodeURIComponent(safeName)}`;
+      const stem = path.basename(safeName, path.extname(safeName)).trim().toLowerCase();
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      const product = products.find(
+        (p) =>
+          (p.codeGold && p.codeGold.toLowerCase() === stem) ||
+          (p.name && normalize(p.name) === normalize(stem)),
+      );
+
+      if (product) {
+        try {
+          const full = await this.productService.findById(product.id);
+          const current = full?.images ?? [];
+          if (!current.includes(imageUrl)) {
+            await this.productService.update(product.id, { images: [...current, imageUrl] } as any);
+          }
+          matched++;
+        } catch (e: any) {
+          this.logger.warn(`Image match update failed for ${product.id}: ${e.message}`);
+        }
+      }
+    }
+
+    return { uploaded: imageFiles.length, matched };
+  }
+
+  async importFromFile(
+    productFile: Express.Multer.File,
+    imageFiles: Express.Multer.File[],
+  ): Promise<{ imported: number; imagesUploaded: number; imagesMatched: number; errors: string[] }> {
+    // ── Parse product rows ─────────────────────────────────────────
+    const { rows: products, errors } = this.isXlsx(productFile.buffer)
+      ? this.parseXlsxBuffer(productFile.buffer)
+      : await this.parseCsvBuffer(productFile.buffer);
+
+    if (products.length === 0) {
+      return { imported: 0, imagesUploaded: imageFiles.length, imagesMatched: 0, errors };
+    }
+
+    // ── Auto-create taxonomy ───────────────────────────────────────
     const seen = new Set<string>();
     for (const p of products) {
       const entries: Array<{ type: 'category' | 'family' | 'subcategory'; name: string; parentName?: string }> = [];
@@ -119,15 +206,23 @@ export class AdminService {
         const key = `${entry.type}:${entry.name}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        try {
-          await this.taxonomyService.create(entry);
-        } catch { /* already exists — ignore */ }
+        try { await this.taxonomyService.create(entry); } catch { /* already exists */ }
       }
     }
 
-    await this.productService.bulkUpsert(products);
+    const upserted = await this.productService.bulkUpsert(products);
 
-    return { imported: products.length, errors };
+    // ── Save and match images ──────────────────────────────────────
+    const { uploaded, matched } = await this.saveAndMatchImages(imageFiles, upserted);
+
+    return { imported: products.length, imagesUploaded: uploaded, imagesMatched: matched, errors };
+  }
+
+  /** @deprecated use importFromFile */
+  async importFromCsv(buffer: Buffer): Promise<{ imported: number; errors: string[] }> {
+    const fakeFile = { buffer, originalname: 'import.csv' } as Express.Multer.File;
+    const { imported, errors } = await this.importFromFile(fakeFile, []);
+    return { imported, errors };
   }
 
   async exportToCsv(): Promise<string> {

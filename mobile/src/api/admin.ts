@@ -107,20 +107,46 @@ export async function deleteTaxonomy(id: string): Promise<void> {
   await apiClient.delete(`/admin/taxonomy/${id}`);
 }
 
-export async function importProductsCsv(fileUri: string): Promise<{ imported: number; errors: string[] }> {
-  const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+export interface ImportResult {
+  imported: number;
+  imagesUploaded: number;
+  imagesMatched: number;
+  errors: string[];
+}
+
+export async function importProductsCsv(
+  fileUri: string,
+  imageUris: string[] = [],
+): Promise<ImportResult> {
+  const filename = fileUri.split('/').pop() ?? 'products';
+  const isXlsx = /\.xlsx?$/i.test(filename);
+
   const formData = new FormData();
   formData.append('file', {
     uri: fileUri,
-    name: 'products.csv',
-    type: 'text/csv',
+    name: filename,
+    type: isXlsx
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'text/csv',
   } as any);
-  const { data } = await apiClient.post<{ imported: number; errors: string[] }>(
+
+  for (const uri of imageUris) {
+    const imgName = uri.split('/').pop() ?? 'image.jpg';
+    const ext = imgName.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+    formData.append('images', {
+      uri,
+      name: imgName,
+      type: mimeMap[ext] ?? 'image/jpeg',
+    } as any);
+  }
+
+  const { data } = await apiClient.post<ImportResult>(
     '/admin/products/import/csv',
     formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000 },
   );
-  return data;
+  return { imported: data.imported ?? 0, imagesUploaded: data.imagesUploaded ?? 0, imagesMatched: data.imagesMatched ?? 0, errors: data.errors ?? [] };
 }
 
 export async function exportProductsCsv(): Promise<void> {
