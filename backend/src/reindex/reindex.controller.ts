@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Query, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -39,4 +39,10 @@ export class ReindexController {
   @Post('retry-failed')
   @ApiOperation({ summary: 'Retry all failed embedding jobs' })
   retryFailed() { return this.reindexService.retryFailed(); }
+
+  @Post('debug-scores')
+  @ApiOperation({ summary: 'Debug: show raw CLIP similarity scores for a test image (no threshold)' })
+  debugScores(@Body('imageBase64') imageBase64: string) {
+    return this.reindexService.debugVectorScores(imageBase64);
+  }
 }

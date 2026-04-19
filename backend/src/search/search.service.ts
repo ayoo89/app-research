@@ -320,16 +320,19 @@ export class SearchService {
       this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
       this.circuit.failures = 0;
 
-      const MIN_VECTOR_SCORE = 0.45;
-      return (rows as any[])
-        .filter((row) => parseFloat(row.vector_score) >= MIN_VECTOR_SCORE)
+      // CLIP image↔text cosine similarity is typically 0.15–0.35 for semantically related pairs
+      const MIN_VECTOR_SCORE = 0.15;
+      const scored = (rows as any[]).map((row) => ({ ...row, _score: parseFloat(row.vector_score) }));
+      this.logger.log(`Vector scores top-5: ${scored.slice(0, 5).map(r => `${r.codeGold}=${r._score.toFixed(4)}`).join(', ')}`);
+      return scored
+        .filter((row) => row._score >= MIN_VECTOR_SCORE)
         .filter((row) => this.productMatchesFilters(row, filters))
         .slice(0, limit)
         .map((row) => this.toResult(
           row,
-          parseFloat(row.vector_score) * weights.vector,
+          row._score * weights.vector,
           ['vector'],
-          { vectorScore: parseFloat(row.vector_score) },
+          { vectorScore: row._score },
         ));
 
     } catch (err) {

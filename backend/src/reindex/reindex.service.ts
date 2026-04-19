@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Product } from '../product/product.entity';
+import { EmbeddingService } from '../product/embedding.service';
 
 // Bump this when the embedding model changes — triggers automatic re-indexing
 export const EMBEDDING_VERSION = 4; // v4: switched to CLIP text embeddings for image search compatibility
@@ -15,6 +16,7 @@ export class ReindexService {
   constructor(
     @InjectRepository(Product) private productRepo: Repository<Product>,
     @InjectQueue('embedding') private embeddingQueue: Queue,
+    private embeddingService: EmbeddingService,
   ) {}
 
   /**
@@ -124,5 +126,41 @@ export class ReindexService {
     const failed = await this.embeddingQueue.getFailed(0, 999);
     await Promise.all(failed.map((j) => j.retry()));
     return { retried: failed.length };
+  }
+
+  /** Debug: run raw vector similarity for an image and return all scores (no threshold) */
+  async debugVectorScores(imageBase64: string): Promise<{
+    embeddingDim: number;
+    productsWithEmbedding: number;
+    topResults: Array<{ codeGold: string | null; name: string; score: number }>;
+  }> {
+    const embedding = await this.embeddingService.generateImageEmbedding(imageBase64);
+    const safeVec = embedding.map((v) => (Number.isFinite(v) ? v : 0));
+    const vecLiteral = `ARRAY[${safeVec.join(',')}]::float8[]`;
+
+    const [rows, countRow] = await Promise.all([
+      this.productRepo.query(
+        `SELECT p."codeGold", p.name,
+                (SELECT COALESCE(SUM(pv * qv), 0)
+                 FROM UNNEST(p."embeddingVector", ${vecLiteral}) AS t(pv, qv)) AS score
+         FROM products p
+         WHERE p."embeddingVector" IS NOT NULL
+         ORDER BY score DESC
+         LIMIT 20`,
+      ),
+      this.productRepo.query(
+        `SELECT COUNT(*) AS total FROM products WHERE "embeddingVector" IS NOT NULL`,
+      ),
+    ]);
+
+    return {
+      embeddingDim: embedding.length,
+      productsWithEmbedding: parseInt(countRow[0]?.total ?? '0', 10),
+      topResults: (rows as any[]).map((r) => ({
+        codeGold: r.codeGold,
+        name:     r.name,
+        score:    parseFloat(r.score),
+      })),
+    };
   }
 }
