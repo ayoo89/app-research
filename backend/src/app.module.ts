@@ -27,15 +27,17 @@ import { HealthModule } from './health/health.module';
         password: cfg.get('DB_PASSWORD', 'postgres'),
         database: cfg.get('DB_NAME', 'product_search'),
         autoLoadEntities: true,
-        synchronize: cfg.get('NODE_ENV') !== 'production',
+        synchronize: cfg.get('NODE_ENV') !== 'production' || cfg.get('DB_SYNC') === 'true',
         logging: cfg.get('NODE_ENV') === 'development' ? ['query', 'error'] : ['error'],
+        ssl: cfg.get('DB_SSL') === 'true' ? { rejectUnauthorized: false } : false,
         // Connection pool — tune for your instance count
         extra: {
-          max: cfg.get<number>('DB_POOL_MAX', 20),
-          min: cfg.get<number>('DB_POOL_MIN', 2),
+          max: cfg.get<number>('DB_POOL_MAX', 10),
+          min: cfg.get<number>('DB_POOL_MIN', 1),
           idleTimeoutMillis: 30_000,
           connectionTimeoutMillis: 5_000,
           statement_timeout: 10_000,  // kill queries > 10s
+          ssl: cfg.get('DB_SSL') === 'true' ? { rejectUnauthorized: false } : false,
         },
         // Read replicas (set DB_REPLICA_HOST for read scaling)
         ...(cfg.get('DB_REPLICA_HOST') ? {
@@ -67,6 +69,7 @@ import { HealthModule } from './health/health.module';
           host:     cfg.get('REDIS_HOST', 'localhost'),
           port:     cfg.get<number>('REDIS_PORT', 6379),
           password: cfg.get('REDIS_PASSWORD'),
+          tls: cfg.get('REDIS_TLS') === 'true' ? {} : undefined,
           // Sentinel support for HA Redis
           ...(cfg.get('REDIS_SENTINEL_HOST') ? {
             sentinels: [{ host: cfg.get('REDIS_SENTINEL_HOST'), port: 26379 }],

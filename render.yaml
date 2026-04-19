@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: productsearch-api
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_SYNC
+        value: "true"
+      - key: DB_SSL
+        value: "true"
+      - key: REDIS_TLS
+        value: "true"
+      - key: JWT_EXPIRES_IN
+        value: "7d"
+      - key: DB_POOL_MAX
+        value: "5"
+      - key: DB_POOL_MIN
+        value: "1"
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ELASTICSEARCH_URL
+        sync: false
+      - key: EMBEDDING_SERVICE_URL
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
