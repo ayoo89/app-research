@@ -114,9 +114,12 @@ export interface ImportResult {
   errors: string[];
 }
 
+export type ImageMatchStrategy = 'order' | 'codegold';
+
 export async function importProductsCsv(
   fileUri: string,
   imageUris: string[] = [],
+  strategy: ImageMatchStrategy = 'codegold',
 ): Promise<ImportResult> {
   const filename = fileUri.split('/').pop() ?? 'products';
   const isXlsx = /\.xlsx?$/i.test(filename);
@@ -140,6 +143,8 @@ export async function importProductsCsv(
       type: mimeMap[ext] ?? 'image/jpeg',
     } as any);
   }
+
+  formData.append('strategy', strategy);
 
   const { data } = await apiClient.post<ImportResult>(
     '/admin/products/import/csv',

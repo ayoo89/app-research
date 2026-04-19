@@ -133,58 +133,97 @@ export class AdminService {
     return buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4B;
   }
 
-  /** Save image files and match them to products by codeGold filename stem */
-  private async saveAndMatchImages(
-    imageFiles: Express.Multer.File[],
-    products: Array<{ id: string; codeGold?: string | null; name?: string }>,
-  ): Promise<{ uploaded: number; matched: number }> {
-    if (!imageFiles.length) return { uploaded: 0, matched: 0 };
-
+  /** Save one image file and return its public URL */
+  private saveImageFile(imgFile: Express.Multer.File, imageBase: string): string {
     const publicDir = path.join(process.cwd(), 'public', 'products');
     fs.mkdirSync(publicDir, { recursive: true });
+    const safeName = imgFile.originalname.replace(/[^a-zA-Z0-9.\-_() ]/g, '_');
+    fs.writeFileSync(path.join(publicDir, safeName), imgFile.buffer);
+    return `${imageBase}/uploads/products/${encodeURIComponent(safeName)}`;
+  }
 
-    const imageBase = this.config
-      .get<string>('IMAGE_BASE_URL', 'https://productsearch-api.onrender.com')
-      .replace(/\/$/, '');
+  private async assignImageToProduct(productId: string, imageUrl: string) {
+    const full = await this.productService.findById(productId);
+    const current = full?.images ?? [];
+    if (!current.includes(imageUrl)) {
+      await this.productService.update(productId, { images: [...current, imageUrl] } as any);
+    }
+  }
 
+  /**
+   * Match by filename numeric value = 1-based product line number.
+   * `1.jpg` → products[0], `2.jpg` → products[1], etc.
+   * Images are sorted by the first integer found in their filename.
+   */
+  private async matchByOrder(
+    imageFiles: Express.Multer.File[],
+    products: Array<{ id: string }>,
+    imageBase: string,
+  ): Promise<{ uploaded: number; matched: number }> {
+    const numFromName = (name: string) => {
+      const m = name.match(/(\d+)/);
+      return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+    };
+    const sorted = [...imageFiles].sort(
+      (a, b) => numFromName(a.originalname) - numFromName(b.originalname),
+    );
+
+    let matched = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const imageUrl = this.saveImageFile(sorted[i], imageBase);
+      const lineIdx = numFromName(sorted[i].originalname) - 1; // 1-based → 0-based
+      const product = products[lineIdx] ?? products[i]; // fallback to positional
+      if (product) {
+        try {
+          await this.assignImageToProduct(product.id, imageUrl);
+          matched++;
+        } catch (e: any) {
+          this.logger.warn(`Order match update failed: ${e.message}`);
+        }
+      }
+    }
+    return { uploaded: imageFiles.length, matched };
+  }
+
+  /**
+   * Match by filename stem == product codeGold (case-insensitive).
+   * `10107324.jpg` → product with codeGold "10107324".
+   */
+  private async matchByCodeGold(
+    imageFiles: Express.Multer.File[],
+    products: Array<{ id: string; codeGold?: string | null; name?: string }>,
+    imageBase: string,
+  ): Promise<{ uploaded: number; matched: number }> {
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     let matched = 0;
 
     for (const imgFile of imageFiles) {
-      // Sanitize filename — keep alphanumerics, dots, dashes, underscores, parens
+      const imageUrl = this.saveImageFile(imgFile, imageBase);
       const safeName = imgFile.originalname.replace(/[^a-zA-Z0-9.\-_() ]/g, '_');
-      const savePath = path.join(publicDir, safeName);
-      fs.writeFileSync(savePath, imgFile.buffer);
+      const stem     = path.basename(safeName, path.extname(safeName)).trim().toLowerCase();
 
-      const imageUrl = `${imageBase}/uploads/products/${encodeURIComponent(safeName)}`;
-      const stem = path.basename(safeName, path.extname(safeName)).trim().toLowerCase();
-      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-      const product = products.find(
+      const product  = products.find(
         (p) =>
           (p.codeGold && p.codeGold.toLowerCase() === stem) ||
-          (p.name && normalize(p.name) === normalize(stem)),
+          (p.name     && normalize(p.name) === normalize(stem)),
       );
 
       if (product) {
         try {
-          const full = await this.productService.findById(product.id);
-          const current = full?.images ?? [];
-          if (!current.includes(imageUrl)) {
-            await this.productService.update(product.id, { images: [...current, imageUrl] } as any);
-          }
+          await this.assignImageToProduct(product.id, imageUrl);
           matched++;
         } catch (e: any) {
-          this.logger.warn(`Image match update failed for ${product.id}: ${e.message}`);
+          this.logger.warn(`CodeGold match update failed for ${product.id}: ${e.message}`);
         }
       }
     }
-
     return { uploaded: imageFiles.length, matched };
   }
 
   async importFromFile(
     productFile: Express.Multer.File,
     imageFiles: Express.Multer.File[],
+    strategy: 'order' | 'codegold' = 'codegold',
   ): Promise<{ imported: number; imagesUploaded: number; imagesMatched: number; errors: string[] }> {
     // ── Parse product rows ─────────────────────────────────────────
     const { rows: products, errors } = this.isXlsx(productFile.buffer)
@@ -213,7 +252,13 @@ export class AdminService {
     const upserted = await this.productService.bulkUpsert(products);
 
     // ── Save and match images ──────────────────────────────────────
-    const { uploaded, matched } = await this.saveAndMatchImages(imageFiles, upserted);
+    const imageBase = this.config
+      .get<string>('IMAGE_BASE_URL', 'https://productsearch-api.onrender.com')
+      .replace(/\/$/, '');
+
+    const { uploaded, matched } = strategy === 'order'
+      ? await this.matchByOrder(imageFiles, upserted, imageBase)
+      : await this.matchByCodeGold(imageFiles, upserted, imageBase);
 
     return { imported: products.length, imagesUploaded: uploaded, imagesMatched: matched, errors };
   }
@@ -221,7 +266,7 @@ export class AdminService {
   /** @deprecated use importFromFile */
   async importFromCsv(buffer: Buffer): Promise<{ imported: number; errors: string[] }> {
     const fakeFile = { buffer, originalname: 'import.csv' } as Express.Multer.File;
-    const { imported, errors } = await this.importFromFile(fakeFile, []);
+    const { imported, errors } = await this.importFromFile(fakeFile, [], 'codegold');
     return { imported, errors };
   }
 

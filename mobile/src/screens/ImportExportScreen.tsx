@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
-import { exportProductsCsv, importProductsCsv } from '../api/admin';
+import { exportProductsCsv, importProductsCsv, ImageMatchStrategy } from '../api/admin';
 import { useI18n } from '../i18n';
 import { colors, spacing, radius, typography, shadow } from '../theme';
 
@@ -17,8 +17,9 @@ export default function ImportExportScreen() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const [productFile, setProductFile]   = useState<PickedFile | null>(null);
-  const [imageFiles,  setImageFiles]    = useState<PickedFile[]>([]);
+  const [productFile, setProductFile] = useState<PickedFile | null>(null);
+  const [imageFiles,  setImageFiles]  = useState<PickedFile[]>([]);
+  const [strategy,    setStrategy]    = useState<ImageMatchStrategy>('order');
 
   // ── Export ──────────────────────────────────────────────────────
   const handleExport = async () => {
@@ -51,9 +52,7 @@ export default function ImportExportScreen() {
       const { uri, name } = result.assets[0];
       setProductFile({ uri, name: name ?? 'products' });
     } catch (e: any) {
-      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') {
-        Alert.alert(t('common_error'), e.message);
-      }
+      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') Alert.alert(t('common_error'), e.message);
     }
   };
 
@@ -67,17 +66,15 @@ export default function ImportExportScreen() {
       });
       if (result.canceled || !result.assets?.length) return;
       const picked = result.assets.map((a) => ({
-        uri: a.uri,
+        uri:  a.uri,
         name: a.name ?? a.uri.split('/').pop() ?? 'image.jpg',
       }));
       setImageFiles((prev) => {
-        const existing = new Set(prev.map((f) => f.uri));
-        return [...prev, ...picked.filter((f) => !existing.has(f.uri))];
+        const seen = new Set(prev.map((f) => f.uri));
+        return [...prev, ...picked.filter((f) => !seen.has(f.uri))];
       });
     } catch (e: any) {
-      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') {
-        Alert.alert(t('common_error'), e.message);
-      }
+      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') Alert.alert(t('common_error'), e.message);
     }
   };
 
@@ -89,13 +86,12 @@ export default function ImportExportScreen() {
       const { imported, imagesUploaded, imagesMatched, errors } = await importProductsCsv(
         productFile.uri,
         imageFiles.map((f) => f.uri),
+        imageFiles.length ? strategy : 'codegold',
       );
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      const lines: string[] = [
-        t('import_export_imported', { count: String(imported) }),
-      ];
+      const lines = [t('import_export_imported', { count: String(imported) })];
       if (imagesUploaded > 0) {
         lines.push(t('import_export_images_result', {
           uploaded: String(imagesUploaded),
@@ -103,12 +99,12 @@ export default function ImportExportScreen() {
         }));
       }
       if (errors.length > 0) {
-        lines.push(`${t('import_export_errors', { count: String(errors.length) })}:\n${errors.slice(0, 5).join('\n')}`);
+        lines.push(
+          `${t('import_export_errors', { count: String(errors.length) })}:\n${errors.slice(0, 5).join('\n')}`,
+        );
       }
 
       Alert.alert(t('import_export_import_done'), lines.join('\n\n'));
-
-      // Reset after success
       setProductFile(null);
       setImageFiles([]);
     } catch (e: any) {
@@ -119,7 +115,8 @@ export default function ImportExportScreen() {
     }
   };
 
-  const canImport = !!productFile && !importing;
+  const hasImages  = imageFiles.length > 0;
+  const canImport  = !!productFile && !importing;
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -134,7 +131,6 @@ export default function ImportExportScreen() {
             onPress={handleExport}
             disabled={exporting}
             accessibilityRole="button"
-            accessibilityLabel={t('import_export_export_action')}
           >
             {exporting
               ? <ActivityIndicator color="#fff" size="small" />
@@ -148,7 +144,7 @@ export default function ImportExportScreen() {
           <Text style={styles.cardTitle}>{t('import_export_import_title')}</Text>
           <Text style={styles.cardDesc}>{t('import_export_import_desc')}</Text>
 
-          {/* Row: product file */}
+          {/* Product file row */}
           <TouchableOpacity
             style={styles.pickerRow}
             onPress={pickProductFile}
@@ -164,7 +160,7 @@ export default function ImportExportScreen() {
                 style={[styles.pickerValue, !productFile && styles.pickerValueEmpty]}
                 numberOfLines={1}
               >
-                {productFile ? productFile.name : t('import_export_import_file_none')}
+                {productFile?.name ?? t('import_export_import_file_none')}
               </Text>
             </View>
             <Text style={styles.pickerChevron}>›</Text>
@@ -172,7 +168,7 @@ export default function ImportExportScreen() {
 
           <View style={styles.divider} />
 
-          {/* Row: images */}
+          {/* Images row */}
           <TouchableOpacity
             style={styles.pickerRow}
             onPress={pickImages}
@@ -185,32 +181,58 @@ export default function ImportExportScreen() {
             <View style={styles.pickerInfo}>
               <Text style={styles.pickerLabel}>{t('import_export_import_pick_images')}</Text>
               <Text
-                style={[styles.pickerValue, !imageFiles.length && styles.pickerValueEmpty]}
+                style={[styles.pickerValue, !hasImages && styles.pickerValueEmpty]}
                 numberOfLines={1}
               >
-                {imageFiles.length
+                {hasImages
                   ? t('import_export_import_images_count', { count: String(imageFiles.length) })
                   : t('import_export_import_images_none')}
               </Text>
             </View>
-            {imageFiles.length > 0 && (
+            {hasImages ? (
               <TouchableOpacity
                 onPress={() => setImageFiles([])}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Clear images"
               >
                 <Text style={styles.clearBtn}>✕</Text>
               </TouchableOpacity>
+            ) : (
+              <Text style={styles.pickerChevron}>›</Text>
             )}
-            {!imageFiles.length && <Text style={styles.pickerChevron}>›</Text>}
           </TouchableOpacity>
+
+          {/* Strategy selector — only visible when images are picked */}
+          {hasImages && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.strategySection}>
+                <Text style={styles.strategyLabel}>
+                  {t('import_export_import_strategy_label')}
+                </Text>
+                <View style={styles.strategyRow}>
+                  <StrategyOption
+                    selected={strategy === 'order'}
+                    onPress={() => setStrategy('order')}
+                    title={t('import_export_import_strategy_order')}
+                    hint={t('import_export_import_strategy_order_hint')}
+                  />
+                  <View style={styles.strategyGap} />
+                  <StrategyOption
+                    selected={strategy === 'codegold'}
+                    onPress={() => setStrategy('codegold')}
+                    title={t('import_export_import_strategy_codegold')}
+                    hint={t('import_export_import_strategy_codegold_hint')}
+                  />
+                </View>
+              </View>
+            </>
+          )}
 
           <TouchableOpacity
             style={[styles.btn, styles.btnImport, !canImport && styles.btnDisabled]}
             onPress={handleImport}
             disabled={!canImport}
             accessibilityRole="button"
-            accessibilityLabel={t('import_export_import_start')}
           >
             {importing
               ? <ActivityIndicator color="#fff" size="small" />
@@ -221,6 +243,30 @@ export default function ImportExportScreen() {
 
       </View>
     </SafeAreaView>
+  );
+}
+
+function StrategyOption({
+  selected, onPress, title, hint,
+}: { selected: boolean; onPress: () => void; title: string; hint: string }) {
+  return (
+    <TouchableOpacity
+      style={[styles.strategyOption, selected && styles.strategyOptionSelected]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+    >
+      <View style={styles.strategyRadioRow}>
+        <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+          {selected && <View style={styles.radioInner} />}
+        </View>
+        <Text style={[styles.strategyOptionTitle, selected && styles.strategyOptionTitleSelected]}>
+          {title}
+        </Text>
+      </View>
+      <Text style={styles.strategyOptionHint} numberOfLines={2}>{hint}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -252,9 +298,44 @@ const styles = StyleSheet.create({
   pickerValueEmpty: { color: colors.placeholder },
   pickerChevron: { fontSize: 20, color: colors.placeholder, marginLeft: spacing.sm },
   clearBtn: { fontSize: 14, color: colors.error, fontWeight: '700', marginLeft: spacing.sm },
-  divider: {
-    height: 1, backgroundColor: colors.border,
-    marginVertical: spacing.xs,
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
+
+  strategySection: { paddingVertical: spacing.md },
+  strategyLabel: {
+    ...typography.label, color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  strategyRow: { flexDirection: 'row' },
+  strategyGap: { width: spacing.sm },
+
+  strategyOption: {
+    flex: 1,
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: colors.bg,
+  },
+  strategyOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  strategyRadioRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
+  radioOuter: {
+    width: 16, height: 16, borderRadius: 8,
+    borderWidth: 2, borderColor: colors.placeholder,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: spacing.xs,
+  },
+  radioOuterSelected: { borderColor: colors.primary },
+  radioInner: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  strategyOptionTitle: {
+    ...typography.label, color: colors.text, fontWeight: '600',
+  },
+  strategyOptionTitleSelected: { color: colors.primary },
+  strategyOptionHint: {
+    ...typography.caption, color: colors.textMuted, fontSize: 11,
   },
 
   btn: {

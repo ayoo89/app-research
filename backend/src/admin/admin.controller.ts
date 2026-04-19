@@ -122,15 +122,17 @@ export class AdminController {
 
   @Post('products/import/csv')
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Import products from CSV/Excel file with optional product images' })
+  @ApiOperation({ summary: 'Import products from CSV/Excel + optional images. strategy: "order" | "codegold"' })
   @UseInterceptors(FileFieldsInterceptor(
     [{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 200 }],
     { limits: { fileSize: 10 * 1024 * 1024 } },
   ))
   importCsv(
     @UploadedFiles() files: { file?: Express.Multer.File[]; images?: Express.Multer.File[] },
+    @Body('strategy') strategy: string,
   ) {
     if (!files?.file?.[0]) throw new BadRequestException('No product file uploaded');
-    return this.adminService.importFromFile(files.file[0], files.images ?? []);
+    const matchStrategy = strategy === 'order' ? 'order' : 'codegold';
+    return this.adminService.importFromFile(files.file[0], files.images ?? [], matchStrategy);
   }
 }
