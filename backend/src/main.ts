@@ -57,13 +57,14 @@ async function bootstrap() {
   // ── Graceful shutdown ───────────────────────────────────────────
   app.enableShutdownHooks();
 
-  // ── pgvector extension ──────────────────────────────────────────
+  // ── PostgreSQL extensions ───────────────────────────────────────
   try {
     const ds = app.get(DataSource);
     await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
-    new Logger('Bootstrap').log('pgvector extension ready ✓');
+    await ds.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    new Logger('Bootstrap').log('PostgreSQL extensions ready (vector, pg_trgm) ✓');
   } catch (e) {
-    new Logger('Bootstrap').warn(`pgvector setup: ${e.message}`);
+    new Logger('Bootstrap').warn(`PostgreSQL extensions setup: ${e.message}`);
   }
 
   const port = process.env.PORT ?? 3000;

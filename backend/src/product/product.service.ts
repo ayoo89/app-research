@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Product } from './product.entity';
@@ -116,5 +116,43 @@ export class ProductService {
       await this.embeddingQueue.add('generate', { productId: p.id });
     }
     return saved;
+  }
+
+  /** Upsert by codeGold: update if exists, create if not. */
+  async bulkUpsert(products: Partial<Product>[]): Promise<Product[]> {
+    const codeGolds = products.map((p) => p.codeGold).filter(Boolean) as string[];
+    const existing = codeGolds.length > 0
+      ? await this.repo.find({ where: { codeGold: In(codeGolds) }, select: ['id', 'codeGold'] })
+      : [];
+    const existingByCode = new Map(existing.map((p) => [p.codeGold, p.id]));
+
+    const toCreate: Partial<Product>[] = [];
+    const toUpdate: Array<{ id: string; data: Partial<Product> }> = [];
+
+    for (const p of products) {
+      const existingId = p.codeGold ? existingByCode.get(p.codeGold) : undefined;
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: p });
+      } else {
+        toCreate.push(p);
+      }
+    }
+
+    const results: Product[] = [];
+
+    if (toCreate.length > 0) {
+      const created = await this.repo.save(this.repo.create(toCreate as Product[]));
+      for (const p of created) {
+        await this.embeddingQueue.add('generate', { productId: p.id });
+      }
+      results.push(...created);
+    }
+
+    for (const { id, data } of toUpdate) {
+      await this.repo.update(id, data);
+      await this.embeddingQueue.add('generate', { productId: id });
+    }
+
+    return results;
   }
 }

@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, ForbiddenException, HttpExcept
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { ProductService } from '../product/product.service';
+import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { UserRole } from '../user/user.entity';
 import * as nodemailer from 'nodemailer';
 import * as csv from 'csv-parser';
@@ -16,6 +17,7 @@ export class AdminService {
   constructor(
     private userService: UserService,
     private productService: ProductService,
+    private taxonomyService: TaxonomyService,
     private config: ConfigService,
   ) {}
 
@@ -104,9 +106,26 @@ export class AdminService {
         .on('error', reject);
     });
 
-    if (products.length > 0) {
-      await this.productService.bulkCreate(products);
+    if (products.length === 0) return { imported: 0, errors };
+
+    // Auto-create taxonomy entries that don't exist yet
+    const seen = new Set<string>();
+    for (const p of products) {
+      const entries: Array<{ type: 'category' | 'family' | 'subcategory'; name: string; parentName?: string }> = [];
+      if (p.category)    entries.push({ type: 'category',    name: p.category });
+      if (p.family)      entries.push({ type: 'family',      name: p.family,      parentName: p.category });
+      if (p.subcategory) entries.push({ type: 'subcategory', name: p.subcategory, parentName: p.family });
+      for (const entry of entries) {
+        const key = `${entry.type}:${entry.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        try {
+          await this.taxonomyService.create(entry);
+        } catch { /* already exists — ignore */ }
+      }
     }
+
+    await this.productService.bulkUpsert(products);
 
     return { imported: products.length, errors };
   }
