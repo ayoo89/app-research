@@ -81,25 +81,19 @@ app = FastAPI(title="Embedding Service", version="2.0.0", lifespan=lifespan)
 def _ensure_index():
     if es.indices.exists(index=ES_INDEX):
         return
+    # ES 7.x: dense_vector does not support index/similarity/index_options
+    # Vector search uses script_score with cosineSimilarity()
     es.indices.create(index=ES_INDEX, body={
         "settings": {
-            "number_of_shards": 2,
-            "number_of_replicas": 1,
-            "refresh_interval": "5s",   # reduce write amplification
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+            "refresh_interval": "5s",
         },
         "mappings": {
             "properties": {
-                # Primary vector field — cosine similarity, HNSW index
                 "embedding": {
                     "type": "dense_vector",
                     "dims": VECTOR_DIM,
-                    "index": True,
-                    "similarity": "cosine",
-                    "index_options": {
-                        "type": "hnsw",
-                        "m": 16,              # HNSW graph connections (higher = better recall, more RAM)
-                        "ef_construction": 100,  # build-time quality
-                    },
                 },
                 "name":     {"type": "text",    "analyzer": "english"},
                 "brand":    {"type": "keyword"},
@@ -108,7 +102,7 @@ def _ensure_index():
             }
         },
     })
-    logger.info(f"Created ES index '{ES_INDEX}' (dim={VECTOR_DIM}, cosine, HNSW)")
+    logger.info(f"Created ES index '{ES_INDEX}' (dim={VECTOR_DIM}, script_score cosine)")
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
 
@@ -263,27 +257,27 @@ def bulk_index(items: list[IndexRequest]):
 def vector_search(req: VectorSearchRequest):
     t0 = time.perf_counter()
 
-    # ef_search controls recall vs speed at query time (higher = better recall)
-    ef_search = max(req.limit * 5, KNN_NUM_CANDS)
-
+    # ES 7.x: use script_score with cosineSimilarity (returns [-1,1] + 1.0 offset → [0,2])
     response = es.search(
         index=ES_INDEX,
         body={
-            "knn": {
-                "field": "embedding",
-                "query_vector": req.embedding,
-                "k": req.limit,
-                "num_candidates": ef_search,
-                "filter": [],  # extend here for category/brand pre-filtering
+            "query": {
+                "script_score": {
+                    "query": {"match_all": {}},
+                    "script": {
+                        "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                        "params": {"query_vector": req.embedding},
+                    },
+                }
             },
-            "min_score": req.min_score,
+            "min_score": req.min_score + 1.0,  # offset by 1.0 to match script_score range
             "_source": False,
             "size": req.limit,
         },
     )
 
     results = [
-        SearchHit(id=hit["_id"], score=round(float(hit["_score"]), 6))
+        SearchHit(id=hit["_id"], score=round(float(hit["_score"]) - 1.0, 6))
         for hit in response["hits"]["hits"]
     ]
 
