@@ -178,33 +178,37 @@ export class SearchService {
             SELECT
               p.id,
               ts_rank_cd(
-                to_tsvector('english',
+                to_tsvector('simple',
                   p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
                   COALESCE(p.description,'') || ' ' || COALESCE(p.category,'') || ' ' ||
                   COALESCE(p.family,'') || ' ' || COALESCE(p.subcategory,'') || ' ' ||
                   COALESCE(p.barcode,'') || ' ' || COALESCE(p."codeGold",'')
                 ),
-                websearch_to_tsquery('english', $1), 32
+                websearch_to_tsquery('simple', $1), 32
               ) AS fts_rank,
               GREATEST(
-                similarity(p.name, $1),
-                similarity(COALESCE(p.brand,''), $1),
-                similarity(COALESCE(p.barcode,''), $1),
-                similarity(COALESCE(p."codeGold",''), $1)
+                similarity(lower(p.name), lower($1)),
+                similarity(lower(COALESCE(p.brand,'')), lower($1)),
+                similarity(lower(COALESCE(p.barcode,'')), lower($1)),
+                similarity(lower(COALESCE(p."codeGold",'')), lower($1))
               ) AS trgm_score
             FROM products p
             WHERE
               (
-                to_tsvector('english',
+                to_tsvector('simple',
                   p.name || ' ' || COALESCE(p.brand,'') || ' ' ||
                   COALESCE(p.description,'') || ' ' || COALESCE(p.category,'') || ' ' ||
                   COALESCE(p.family,'') || ' ' || COALESCE(p.subcategory,'') || ' ' ||
                   COALESCE(p.barcode,'') || ' ' || COALESCE(p."codeGold",'')
-                ) @@ websearch_to_tsquery('english', $1)
-                OR similarity(p.name, $1) > 0.2
-                OR similarity(COALESCE(p.brand,''), $1) > 0.25
-                OR similarity(COALESCE(p.barcode,''), $1) > 0.3
-                OR similarity(COALESCE(p."codeGold",''), $1) > 0.35
+                ) @@ websearch_to_tsquery('simple', $1)
+                OR lower(p.name) LIKE '%' || lower($1) || '%'
+                OR lower(COALESCE(p.category,'')) LIKE '%' || lower($1) || '%'
+                OR lower(COALESCE(p.family,'')) LIKE '%' || lower($1) || '%'
+                OR lower(COALESCE(p.subcategory,'')) LIKE '%' || lower($1) || '%'
+                OR similarity(lower(p.name), lower($1)) > 0.2
+                OR similarity(lower(COALESCE(p.brand,'')), lower($1)) > 0.25
+                OR similarity(lower(COALESCE(p.barcode,'')), lower($1)) > 0.3
+                OR similarity(lower(COALESCE(p."codeGold",'')), lower($1)) > 0.35
               )
               AND ($3::text IS NULL OR strpos(lower(coalesce(p.category,'')), $3) > 0)
               AND ($4::text IS NULL OR strpos(lower(coalesce(p.subcategory,'')), $4) > 0)
