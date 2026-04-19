@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  * iOS simulator    → http://localhost:3000/api/v1
  * Physical device  → http://<your-lan-ip>:3000/api/v1
  */
-const DEV_URL = 'http://192.168.1.89:3000/api/v1';
+const DEV_URL = 'https://productsearch-api.onrender.com/api/v1';
 export const BASE_URL: string = (process.env.EXPO_PUBLIC_API_URL as string) ?? DEV_URL;
 
 export const apiClient = axios.create({
