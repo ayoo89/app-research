@@ -289,17 +289,21 @@ export class SearchService {
         this.metrics.increment('embed_cache_misses_total');
       }
 
-      // pgvector cosine similarity search directly on PostgreSQL
-      const vectorStr = `[${embedding.join(',')}]`;
+      // Cosine similarity via dot product of L2-normalised vectors (no pgvector extension needed).
+      // Both product embeddings and query embeddings are L2-normalised at generation time,
+      // so dot-product == cosine similarity.
+      const vectorStr = `{${embedding.join(',')}}`;
       const rows = await Promise.race([
         this.productRepo.query(
           `SELECT p.id, p.name, p.brand, p."codeGold", p.barcode,
                   p.category, p.subcategory, p.family, p.images,
-                  1 - (p."embeddingVector"::vector(512) <=> $1::vector(512)) AS vector_score
+                  (SELECT COALESCE(SUM(pv * qv), 0)
+                   FROM UNNEST(p."embeddingVector", $1::float8[]) AS t(pv, qv)) AS vector_score
            FROM products p
            WHERE p."embeddingVector" IS NOT NULL
              AND array_length(p."embeddingVector", 1) = 512
-           ORDER BY p."embeddingVector"::vector(512) <=> $1::vector(512)
+           ORDER BY (SELECT COALESCE(SUM(pv * qv), 0)
+                     FROM UNNEST(p."embeddingVector", $1::float8[]) AS t(pv, qv)) DESC NULLS LAST
            LIMIT $2`,
           [vectorStr, limit * 3],
         ),
