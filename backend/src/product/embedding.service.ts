@@ -36,6 +36,12 @@ export class EmbeddingService {
     return data.embedding;
   }
 
+  /** Text embedding via CLIP — same vector space as image embeddings, use for product indexing */
+  async generateClipTextEmbedding(text: string): Promise<number[]> {
+    const { data } = await this.http.post('/embed/text/clip', { text });
+    return data.embedding;
+  }
+
   /**
    * Hybrid embedding: fuse text + image embeddings when both are available.
    * Uses weighted average in the shared CLIP embedding space.

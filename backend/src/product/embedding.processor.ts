@@ -43,20 +43,21 @@ export class EmbeddingProcessor {
     const firstImage = product.images?.[0];
     let embedding: number[];
 
-    // Only use image embedding for inline base64 data URIs — not remote URLs
+    // Use CLIP for all product embeddings so they live in the same vector space as image queries.
+    // If product has an inline base64 image, fuse CLIP-text + CLIP-image for richer representation.
     if (firstImage && firstImage.startsWith('data:image/') && firstImage.includes(',')) {
       const base64 = firstImage.split(',')[1];
       if (base64) {
         embedding = await this.embeddingService.generateHybridEmbedding({
           text,
           imageBase64: base64,
-          textWeight: 0.6,
+          textWeight: 0.5,
         });
       } else {
-        embedding = await this.embeddingService.generateTextEmbedding(text);
+        embedding = await this.embeddingService.generateClipTextEmbedding(text);
       }
     } else {
-      embedding = await this.embeddingService.generateTextEmbedding(text);
+      embedding = await this.embeddingService.generateClipTextEmbedding(text);
     }
 
     await this.productRepo.update(productId, {

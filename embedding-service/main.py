@@ -84,6 +84,11 @@ def _encode_text(text: str) -> np.ndarray:
     vec = text_model.encode(text, normalize_embeddings=True, show_progress_bar=False)
     return _to_target_dim(vec)
 
+def _encode_text_clip(text: str) -> np.ndarray:
+    """Encode text with CLIP — same vector space as image embeddings."""
+    vec = image_model.encode(text, normalize_embeddings=True, show_progress_bar=False)
+    return _to_target_dim(vec)
+
 def _encode_image(b64: str) -> np.ndarray:
     img_bytes = base64.b64decode(b64)
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -137,6 +142,20 @@ def embed_text(req: TextEmbedRequest):
     if cached:
         return {"embedding": cached, "dim": len(cached)}
     vec = _encode_text(req.text)
+    _set_cached_embed(ck, vec)
+    return {"embedding": vec.tolist(), "dim": len(vec)}
+
+
+@app.post("/embed/text/clip", response_model=EmbedResponse)
+def embed_text_clip(req: TextEmbedRequest):
+    """Text embedding using CLIP — same vector space as image embeddings."""
+    if not req.text.strip():
+        raise HTTPException(400, "Empty text")
+    ck = _cache_key("txtclip", req.text)
+    cached = _get_cached_embed(ck)
+    if cached:
+        return {"embedding": cached, "dim": len(cached)}
+    vec = _encode_text_clip(req.text)
     _set_cached_embed(ck, vec)
     return {"embedding": vec.tolist(), "dim": len(vec)}
 
