@@ -69,7 +69,7 @@ import { HealthModule } from './health/health.module';
           host:     cfg.get('REDIS_HOST', 'localhost'),
           port:     cfg.get<number>('REDIS_PORT', 6379),
           password: cfg.get('REDIS_PASSWORD'),
-          tls: cfg.get('REDIS_TLS') === 'true' ? {} : undefined,
+          tls: cfg.get('REDIS_TLS') === 'true' ? { rejectUnauthorized: false } : undefined,
           // Sentinel support for HA Redis
           ...(cfg.get('REDIS_SENTINEL_HOST') ? {
             sentinels: [{ host: cfg.get('REDIS_SENTINEL_HOST'), port: 26379 }],
