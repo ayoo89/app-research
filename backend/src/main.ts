@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { CorrelationIdMiddleware } from './common/correlation-id.middleware';
@@ -55,6 +56,15 @@ async function bootstrap() {
 
   // ── Graceful shutdown ───────────────────────────────────────────
   app.enableShutdownHooks();
+
+  // ── pgvector extension ──────────────────────────────────────────
+  try {
+    const ds = app.get(DataSource);
+    await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
+    new Logger('Bootstrap').log('pgvector extension ready ✓');
+  } catch (e) {
+    new Logger('Bootstrap').warn(`pgvector setup: ${e.message}`);
+  }
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');

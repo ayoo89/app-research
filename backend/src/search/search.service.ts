@@ -5,7 +5,7 @@ import Redis from 'ioredis';
 import * as crypto from 'crypto';
 
 import { Product } from '../product/product.entity';
-import { EmbeddingService, VectorHit } from '../product/embedding.service';
+import { EmbeddingService } from '../product/embedding.service';
 import { MetricsService } from '../common/metrics.service';
 import { REDIS_CLIENT } from './cache.module';
 import {
@@ -255,7 +255,6 @@ export class SearchService {
     if (this.circuit.openUntil > Date.now()) {
       this.logger.warn('Embedding circuit open — skipping vector search');
       this.metrics.increment('search_circuit_open_total');
-      // Fallback: use text search if we have text
       if (fallbackText?.trim()) {
         this.logger.log('Circuit fallback → text search');
         return this.runTextSearch(fallbackText.trim(), limit, weights, filters);
@@ -266,7 +265,7 @@ export class SearchService {
     const t0 = Date.now();
     try {
       // Embedding cache
-      const imgHash      = crypto.createHash('sha256').update(imageBase64.slice(0, 2000)).digest('hex');
+      const imgHash       = crypto.createHash('sha256').update(imageBase64.slice(0, 2000)).digest('hex');
       const embedCacheKey = `embed:img:${imgHash}`;
       let embedding: number[];
 
@@ -286,35 +285,43 @@ export class SearchService {
         this.metrics.increment('embed_cache_misses_total');
       }
 
-      const hits = await Promise.race([
-        this.embeddingService.vectorSearch(embedding, limit, 0.45),
-        this.timeout<VectorHit[]>(2000, 'vector-search'),
+      // pgvector cosine similarity search directly on PostgreSQL
+      const vectorStr = `[${embedding.join(',')}]`;
+      const rows = await Promise.race([
+        this.productRepo.query(
+          `SELECT p.id, p.name, p.brand, p."codeGold", p.barcode,
+                  p.category, p.subcategory, p.family, p.images,
+                  1 - (p."embeddingVector"::vector(512) <=> $1::vector(512)) AS vector_score
+           FROM products p
+           WHERE p."embeddingVector" IS NOT NULL
+             AND array_length(p."embeddingVector", 1) = 512
+           ORDER BY p."embeddingVector"::vector(512) <=> $1::vector(512)
+           LIMIT $2`,
+          [vectorStr, limit * 3],
+        ),
+        this.timeout<any[]>(3000, 'vector-search'),
       ]);
 
       this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
-      this.circuit.failures = 0; // reset on success
+      this.circuit.failures = 0;
 
-      if (!hits.length) return [];
-
-      // Batch-fetch products in one query
-      const ids      = hits.map((h) => h.id);
-      const products = await this.productRepo.createQueryBuilder('p').whereInIds(ids).getMany();
-      const pMap     = new Map(products.map((p) => [p.id, p]));
-
-      return hits
-        .map((hit) => {
-          const p = pMap.get(hit.id);
-          if (!p || !this.productMatchesFilters(p, filters)) return null;
-          return this.toResult(p, hit.score * weights.vector, ['vector'], { vectorScore: hit.score });
-        })
-        .filter(Boolean) as SearchResult[];
+      const MIN_VECTOR_SCORE = 0.45;
+      return (rows as any[])
+        .filter((row) => parseFloat(row.vector_score) >= MIN_VECTOR_SCORE)
+        .filter((row) => this.productMatchesFilters(row, filters))
+        .slice(0, limit)
+        .map((row) => this.toResult(
+          row,
+          parseFloat(row.vector_score) * weights.vector,
+          ['vector'],
+          { vectorScore: parseFloat(row.vector_score) },
+        ));
 
     } catch (err) {
       const ms = Date.now() - t0;
       this.logger.warn(`Vector search failed (${ms}ms): ${err.message}`);
       this.metrics.increment('search_errors_total', { stage: 'vector' });
 
-      // Circuit breaker — trip after threshold
       this.circuit.failures++;
       if (this.circuit.failures >= this.CIRCUIT_THRESHOLD) {
         this.circuit.openUntil = Date.now() + this.CIRCUIT_RESET_MS;
@@ -322,7 +329,6 @@ export class SearchService {
         this.metrics.increment('search_circuit_tripped_total');
       }
 
-      // Fallback to text search
       if (fallbackText?.trim()) {
         this.logger.log('Vector failure fallback → text search');
         return this.runTextSearch(fallbackText.trim(), limit, weights, filters);

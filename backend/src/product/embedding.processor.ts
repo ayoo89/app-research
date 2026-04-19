@@ -69,16 +69,6 @@ export class EmbeddingProcessor {
       } as any,
     });
 
-    await this.embeddingService.indexProduct(productId, embedding, {
-      name:          product.name,
-      brand:         product.brand         ?? '',
-      category:      product.category      ?? '',
-      family:        product.family        ?? '',
-      subcategory:   product.subcategory   ?? '',
-      barcode:       product.barcode       ?? '',
-      code_gold:     product.codeGold      ?? '',
-    });
-
     const ms = Date.now() - t0;
     this.metrics.observe('embedding_generation_ms', ms);
     this.metrics.increment('embedding_generated_total');

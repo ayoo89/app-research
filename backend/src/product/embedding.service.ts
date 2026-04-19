@@ -41,7 +41,7 @@ export class EmbeddingService {
    * Uses weighted average in the shared CLIP embedding space.
    */
   async generateHybridEmbedding(req: HybridEmbedRequest): Promise<number[]> {
-    const textWeight = req.textWeight ?? 0.5;
+    const textWeight  = req.textWeight ?? 0.5;
     const imageWeight = 1 - textWeight;
 
     if (req.text && req.imageBase64) {
@@ -57,58 +57,8 @@ export class EmbeddingService {
     throw new Error('HybridEmbedRequest requires at least text or imageBase64');
   }
 
-  /**
-   * KNN vector search via Elasticsearch.
-   * Returns hits sorted by cosine similarity (highest first).
-   */
-  async vectorSearch(
-    embedding: number[],
-    limit = 20,
-    minScore = 0.5,
-  ): Promise<VectorHit[]> {
-    try {
-      const { data } = await this.http.post(
-        '/search/vector',
-        { embedding, limit, min_score: minScore },
-        { timeout: 3000 },
-      );
-      return data.results;
-    } catch (err) {
-      this.logger.warn(`Vector search failed: ${err.message}`);
-      return [];
-    }
-  }
-
-  /** Index a product's embedding in Elasticsearch */
-  async indexProduct(
-    productId: string,
-    embedding: number[],
-    metadata: Record<string, any>,
-  ): Promise<void> {
-    try {
-      await this.http.post('/index', { id: productId, embedding, metadata });
-    } catch (err) {
-      this.logger.error(`Index failed for ${productId}: ${err.message}`);
-      throw err;
-    }
-  }
-
-  /** Remove a product from the vector index */
-  async deleteFromIndex(productId: string): Promise<void> {
-    try {
-      await this.http.delete(`/index/${productId}`);
-    } catch (err) {
-      this.logger.warn(`Delete from index failed for ${productId}: ${err.message}`);
-    }
-  }
-
   // ── Weighted average fusion ──────────────────────────────────────
-  private fuseEmbeddings(
-    a: number[],
-    b: number[],
-    wA: number,
-    wB: number,
-  ): number[] {
+  private fuseEmbeddings(a: number[], b: number[], wA: number, wB: number): number[] {
     const fused = a.map((v, i) => v * wA + b[i] * wB);
     return this.l2Normalize(fused);
   }
