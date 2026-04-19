@@ -273,7 +273,13 @@ export class SearchService {
       const embedCacheKey = `embed:img:${imgHash}`;
       let embedding: number[];
 
-      const cachedEmbed = await this.redis.getBuffer(embedCacheKey);
+      let cachedEmbed: Buffer | null = null;
+      try {
+        cachedEmbed = await this.redis.getBuffer(embedCacheKey);
+      } catch (redisErr: any) {
+        this.logger.warn(`Redis getBuffer failed: ${redisErr.message}`);
+      }
+
       if (cachedEmbed) {
         const floats = new Float32Array(cachedEmbed.buffer, cachedEmbed.byteOffset, cachedEmbed.byteLength / 4);
         embedding = Array.from(floats);
