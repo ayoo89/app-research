@@ -4,6 +4,41 @@ Hybrid product search over millions of products. Barcode scan, image search, and
 
 ---
 
+## Production Deployment
+
+| Service | Platform | URL |
+|---------|----------|-----|
+| NestJS API | Render (free) | `https://productsearch-api.onrender.com` |
+| PostgreSQL | Neon (serverless free) | — |
+| Redis | Upstash (free) | — |
+| Elasticsearch | Bonsai (free) | — |
+| Embedding service | HuggingFace Spaces (free) | `https://dsayoo-productsearch-embeddings.hf.space` |
+
+**Backend env vars required in Render dashboard:**
+
+| Variable | Description |
+|----------|-------------|
+| `DB_HOST` | Neon PostgreSQL host |
+| `DB_PORT` | `5432` |
+| `DB_USERNAME` | Neon username |
+| `DB_PASSWORD` | Neon password |
+| `DB_NAME` | Database name |
+| `DB_SSL` | `true` |
+| `DB_SYNC` | `true` (first deploy) |
+| `REDIS_HOST` | Upstash host |
+| `REDIS_PORT` | `6379` |
+| `REDIS_PASSWORD` | Upstash password |
+| `REDIS_TLS` | `true` |
+| `JWT_SECRET` | Random secret string |
+| `ELASTICSEARCH_URL` | Bonsai URL with credentials |
+| `EMBEDDING_SERVICE_URL` | HuggingFace Space URL |
+| `SUPER_ADMIN_EMAIL` | Initial admin email |
+| `SUPER_ADMIN_PASSWORD` | Initial admin password |
+
+**Mobile APK (Android):** Build with `./gradlew assembleRelease` from `mobile/android/` — requires Java 21 (Android Studio JBR) and `sqlitejdbc.dll` fix (see `gradle.properties`).
+
+---
+
 ## Architecture
 
 ```
