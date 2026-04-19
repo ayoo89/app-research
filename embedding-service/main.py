@@ -243,7 +243,7 @@ def embed_hybrid(req: HybridEmbedRequest):
 @app.post("/index")
 def index_product(req: IndexRequest):
     doc = {"embedding": req.embedding, **req.metadata}
-    es.index(index=ES_INDEX, id=req.id, document=doc, refresh=False)
+    es.index(index=ES_INDEX, id=req.id, body=doc, refresh=False)
     return {"indexed": req.id}
 
 
