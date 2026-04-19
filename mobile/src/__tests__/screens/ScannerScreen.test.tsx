@@ -40,8 +40,8 @@ import ScannerScreen from '../../screens/ScannerScreen';
 import { searchByBarcode } from '../../api/search';
 import { useNetworkStore } from '../../store/networkStore';
 
-const mockSearchByBarcode = searchByBarcode as jest.Mock;
-const mockUseNetworkStore = useNetworkStore as jest.Mock;
+const mockSearchByBarcode = searchByBarcode as unknown as jest.Mock;
+const mockUseNetworkStore = useNetworkStore as unknown as jest.Mock;
 
 const MOCK_PRODUCT = {
   id: 'prod-1', name: 'Widget', brand: null, codeGold: null, barcode: '1234567890128',

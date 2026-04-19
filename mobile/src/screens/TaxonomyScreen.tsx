@@ -222,7 +222,7 @@ export default function TaxonomyScreen() {
       {/* Add / Edit Modal */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={[styles.modalCard, shadow.lg]}>
+          <View style={[styles.modalCard, shadow.md]}>
             <Text style={styles.modalTitle}>
               {editingEntry ? t('taxonomy_edit_title') : addTitle[activeTab]}
             </Text>

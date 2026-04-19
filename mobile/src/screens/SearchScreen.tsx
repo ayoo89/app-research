@@ -471,7 +471,7 @@ export default function SearchScreen() {
           activeOpacity={1}
           onPress={() => setPickerField(null)}
         >
-          <View style={[styles.pickerSheet, shadow.lg]}>
+          <View style={[styles.pickerSheet, shadow.md]}>
             <View style={styles.pickerHeader}>
               <Text style={styles.pickerTitle}>
                 {pickerField === 'category'

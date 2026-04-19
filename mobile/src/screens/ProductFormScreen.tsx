@@ -155,7 +155,7 @@ function Field({ label, value, onChangeText, placeholder, required, multiline, k
         numberOfLines={multiline ? 4 : 1}
         textAlignVertical={multiline ? 'top' : 'center'}
         accessibilityLabel={label}
-        accessibilityRequired={required}
+        accessibilityHint={required ? 'required' : undefined}
       />
     </View>
   );

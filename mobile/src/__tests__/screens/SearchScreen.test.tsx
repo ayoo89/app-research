@@ -71,10 +71,10 @@ import { searchByText, searchByImage } from '../../api/search';
 import { launchImageLibraryAsync } from 'expo-image-picker';
 import { useNetworkStore } from '../../store/networkStore';
 
-const mockSearchByText  = searchByText  as jest.Mock;
-const mockSearchByImage = searchByImage as jest.Mock;
-const mockLaunchGallery = launchImageLibraryAsync as jest.Mock;
-const mockUseNetworkStore = useNetworkStore as jest.Mock;
+const mockSearchByText  = searchByText  as unknown as jest.Mock;
+const mockSearchByImage = searchByImage as unknown as jest.Mock;
+const mockLaunchGallery = launchImageLibraryAsync as unknown as jest.Mock;
+const mockUseNetworkStore = useNetworkStore as unknown as jest.Mock;
 
 const makeResults = (n = 1) => ({
   results: Array.from({ length: n }, (_, i) => ({

@@ -33,8 +33,8 @@ import CatalogScreen from '../../screens/CatalogScreen';
 import { listProducts } from '../../api/admin';
 import { useAuthStore } from '../../store/authStore';
 
-const mockListProducts = listProducts as jest.Mock;
-const mockUseAuthStore = useAuthStore as jest.Mock;
+const mockListProducts = listProducts as unknown as jest.Mock;
+const mockUseAuthStore = useAuthStore as unknown as jest.Mock;
 
 const MOCK_PRODUCTS = {
   data: [

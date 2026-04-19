@@ -160,6 +160,7 @@ export const en = {
   catalog_fab_hint: 'Opens the product creation form',
 
   common_cancel: 'Cancel',
+  common_delete: 'Delete',
   common_error: 'Error',
 
   product_form_title_create: 'New product',
@@ -400,6 +401,7 @@ export const fr: Record<TranslationKey, string> = {
   catalog_fab_hint: 'Ouvre le formulaire de création de produit',
 
   common_cancel: 'Annuler',
+  common_delete: 'Supprimer',
   common_error: 'Erreur',
 
   product_form_title_create: 'Nouveau produit',

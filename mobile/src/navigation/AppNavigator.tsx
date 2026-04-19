@@ -135,12 +135,9 @@ export default function AppNavigator() {
           screenOptions={{
             headerStyle: {
               backgroundColor: colors.primary,
-              elevation: 0,
-              shadowOpacity: 0,
-              borderBottomWidth: 0,
-            },
+            } as any,
             headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: '700', fontSize: 18, letterSpacing: -0.3 },
+            headerTitleStyle: { fontWeight: '700', fontSize: 18, letterSpacing: -0.3 } as any,
             headerShadowVisible: false,
             headerBackTitleVisible: false,
             animation: 'slide_from_right',

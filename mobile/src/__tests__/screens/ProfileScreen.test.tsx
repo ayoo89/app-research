@@ -23,7 +23,7 @@ const mockState = {
 describe('ProfileScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (useAuthStore as jest.Mock).mockImplementation((selector?: any) =>
+    (useAuthStore as unknown as jest.Mock).mockImplementation((selector?: any) =>
       typeof selector === 'function' ? selector(mockState) : mockState,
     );
   });
