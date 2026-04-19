@@ -1,5 +1,6 @@
 import React from 'react';
 import { StatusBar, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
 import AppNavigator from './src/navigation/AppNavigator';
 import { I18nProvider } from './src/i18n';
@@ -8,6 +9,7 @@ import { colors } from './src/theme';
 
 export default function App() {
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <ErrorBoundary>
       <I18nProvider>
         <View style={{ flex: 1 }}>
@@ -22,5 +24,6 @@ export default function App() {
         </View>
       </I18nProvider>
     </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
