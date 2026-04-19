@@ -31,7 +31,6 @@ export default function ProductDetailScreen({ route }: any) {
     try {
       const p = await getProduct(id);
       setProduct(p);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     } catch (e: any) {
       setError(e.message ?? t('product_error_sub'));
     } finally {
@@ -40,6 +39,14 @@ export default function ProductDetailScreen({ route }: any) {
   }, [id, t]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Start fade-in only after the Animated.View is mounted (loading=false, product set)
+  useEffect(() => {
+    if (product) {
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+    }
+  }, [product]);
 
   const onImageScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);

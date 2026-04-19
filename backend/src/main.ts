@@ -1,19 +1,24 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DataSource } from 'typeorm';
+import { join } from 'path';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { CorrelationIdMiddleware } from './common/correlation-id.middleware';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // Use structured JSON logger in production
     logger: process.env.NODE_ENV === 'production'
       ? ['error', 'warn', 'log']
       : ['error', 'warn', 'log', 'debug', 'verbose'],
     bufferLogs: true,
   });
+
+  // ── Static assets (product images) ─────────────────────────────
+  app.useStaticAssets(join(__dirname, '..', 'public'), { prefix: '/uploads' });
 
   // ── Middleware ──────────────────────────────────────────────────
   app.use(new CorrelationIdMiddleware().use.bind(new CorrelationIdMiddleware()));

@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Delete, Param, Body, Query,
-  UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, DefaultValuePipe, BadRequestException,
+  UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, DefaultValuePipe, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
@@ -51,8 +51,10 @@ export class ProductController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.productService.findById(id);
+  async findOne(@Param('id') id: string) {
+    const product = await this.productService.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
   }
 
   @Post()
