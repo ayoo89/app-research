@@ -4,6 +4,8 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DataSource } from 'typeorm';
 import { join } from 'path';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const compression = require('compression');
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { CorrelationIdMiddleware } from './common/correlation-id.middleware';
@@ -21,6 +23,7 @@ async function bootstrap() {
   app.useStaticAssets(join(__dirname, '..', 'public'), { prefix: '/uploads' });
 
   // ── Middleware ──────────────────────────────────────────────────
+  app.use(compression());
   app.use(new CorrelationIdMiddleware().use.bind(new CorrelationIdMiddleware()));
 
   // ── Global config ───────────────────────────────────────────────
@@ -62,12 +65,29 @@ async function bootstrap() {
   // ── Graceful shutdown ───────────────────────────────────────────
   app.enableShutdownHooks();
 
-  // ── PostgreSQL extensions ───────────────────────────────────────
+  // ── PostgreSQL extensions + performance indexes ─────────────────
   try {
     const ds = app.get(DataSource);
     await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
     await ds.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     new Logger('Bootstrap').log('PostgreSQL extensions ready (vector, pg_trgm) ✓');
+
+    // GIN index for full-text search — accelerates websearch_to_tsquery queries
+    await ds.query(`
+      CREATE INDEX IF NOT EXISTS products_fts_gin ON products USING gin(
+        to_tsvector('simple',
+          name || ' ' || COALESCE(brand,'') || ' ' || COALESCE("codeGold",'') || ' ' ||
+          COALESCE(category,'') || ' ' || COALESCE(family,'') || ' ' || COALESCE(subcategory,'')
+        )
+      )
+    `).catch((e: any) => new Logger('Bootstrap').warn(`FTS GIN index: ${e.message}`));
+
+    // Trigram GIN index — accelerates LIKE and similarity() queries on product name
+    await ds.query(`
+      CREATE INDEX IF NOT EXISTS products_name_trgm ON products USING gin(lower(name) gin_trgm_ops)
+    `).catch((e: any) => new Logger('Bootstrap').warn(`Trigram index: ${e.message}`));
+
+    new Logger('Bootstrap').log('PostgreSQL performance indexes ensured ✓');
   } catch (e) {
     new Logger('Bootstrap').warn(`PostgreSQL extensions setup: ${e.message}`);
   }

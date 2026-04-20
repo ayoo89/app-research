@@ -40,13 +40,23 @@ export async function updateUser(id: string, payload: { isActive?: boolean; role
   return data;
 }
 
-export async function listProducts(page = 1, limit = 20): Promise<{
-  data: import('./search').Product[];
-  total: number;
-  page: number;
-  limit: number;
-}> {
-  const { data } = await apiClient.get('/products', { params: { page, limit } });
+export async function listProducts(
+  page = 1,
+  limit = 20,
+  search?: string,
+  family?: string,
+  subcategory?: string,
+  category?: string,
+): Promise<{ data: import('./search').Product[]; total: number; page: number; limit: number }> {
+  const { data } = await apiClient.get('/products', {
+    params: {
+      page, limit,
+      ...(search     ? { search }     : {}),
+      ...(family     ? { family }     : {}),
+      ...(subcategory ? { subcategory } : {}),
+      ...(category   ? { category }   : {}),
+    },
+  });
   return data;
 }
 
@@ -59,6 +69,8 @@ export interface ProductPayload {
   category?: string;
   family?: string;
   subcategory?: string;
+  price?: number;
+  stock?: number;
 }
 
 export async function createProduct(payload: ProductPayload): Promise<import('./search').Product> {
@@ -69,6 +81,10 @@ export async function createProduct(payload: ProductPayload): Promise<import('./
 export async function updateProduct(id: string, payload: ProductPayload): Promise<import('./search').Product> {
   const { data } = await apiClient.put<import('./search').Product>(`/products/${id}`, payload);
   return data;
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  await apiClient.delete(`/products/${id}`);
 }
 
 export async function getDistinctValues(field: 'category' | 'family' | 'subcategory'): Promise<string[]> {
@@ -107,19 +123,44 @@ export async function deleteTaxonomy(id: string): Promise<void> {
   await apiClient.delete(`/admin/taxonomy/${id}`);
 }
 
+export interface ImageUploadDetail {
+  filename: string;
+  matched: boolean;
+  productName?: string;
+  productId?: string;
+  reason?: string;
+}
+
+export interface ProductImportRow {
+  name: string;
+  codeGold?: string | null;
+  success: boolean;
+  reason?: string;
+}
+
 export interface ImportResult {
   imported: number;
   imagesUploaded: number;
   imagesMatched: number;
   errors: string[];
+  imageResults?: ImageUploadDetail[];
+  productResults?: ProductImportRow[];
 }
 
-export type ImageMatchStrategy = 'order' | 'codegold';
+export interface ImageUploadResult {
+  uploaded: number;
+  matched: number;
+  errors: string[];
+  imageResults: ImageUploadDetail[];
+}
+
+export type ImageMatchStrategy = 'order' | 'codegold' | 'barcode';
 
 export async function importProductsCsv(
   fileUri: string,
   imageUris: string[] = [],
-  strategy: ImageMatchStrategy = 'codegold',
+  strategy: 'order' | 'codegold' = 'codegold',
+  onProgress?: (pct: number, phase: 'upload' | 'processing') => void,
 ): Promise<ImportResult> {
   const filename = fileUri.split('/').pop() ?? 'products';
   const isXlsx = /\.xlsx?$/i.test(filename);
@@ -133,7 +174,9 @@ export async function importProductsCsv(
       : 'text/csv',
   } as any);
 
-  for (const uri of imageUris) {
+  const BATCH_SIZE = 5;
+  const batch = imageUris.slice(0, BATCH_SIZE * 10); // cap at 50 to prevent timeout
+  for (const uri of batch) {
     const imgName = uri.split('/').pop() ?? 'image.jpg';
     const ext = imgName.split('.').pop()?.toLowerCase() ?? 'jpg';
     const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
@@ -149,9 +192,70 @@ export async function importProductsCsv(
   const { data } = await apiClient.post<ImportResult>(
     '/admin/products/import/csv',
     formData,
-    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000 },
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120_000,
+      onUploadProgress: onProgress
+        ? (e: any) => {
+            const pct = e.total ? Math.round((e.loaded / e.total) * 100) : 0;
+            if (pct < 100) {
+              onProgress(pct, 'upload');
+            } else {
+              onProgress(100, 'processing');
+            }
+          }
+        : undefined,
+    },
   );
-  return { imported: data.imported ?? 0, imagesUploaded: data.imagesUploaded ?? 0, imagesMatched: data.imagesMatched ?? 0, errors: data.errors ?? [] };
+  return {
+    imported: data.imported ?? 0,
+    imagesUploaded: data.imagesUploaded ?? 0,
+    imagesMatched: data.imagesMatched ?? 0,
+    errors: data.errors ?? [],
+    imageResults: data.imageResults ?? [],
+    productResults: data.productResults ?? [],
+  };
+}
+
+const MIME: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+
+function buildBatchFormData(uris: string[], strategy: string): FormData {
+  const fd = new FormData();
+  for (const uri of uris) {
+    const name = uri.split('/').pop() ?? 'image.jpg';
+    const ext  = name.split('.').pop()?.toLowerCase() ?? 'jpg';
+    fd.append('images', { uri, name, type: MIME[ext] ?? 'image/jpeg' } as any);
+  }
+  fd.append('strategy', strategy);
+  return fd;
+}
+
+export async function uploadProductImages(
+  imageUris: string[],
+  strategy: 'codegold' | 'barcode' = 'codegold',
+  onProgress?: (done: number, total: number, phase: 'upload' | 'processing') => void,
+): Promise<ImageUploadResult> {
+  const BATCH = 10;
+  const total = imageUris.length;
+  const acc: ImageUploadResult = { uploaded: 0, matched: 0, errors: [], imageResults: [] };
+
+  for (let i = 0; i < total; i += BATCH) {
+    const slice = imageUris.slice(i, i + BATCH);
+    onProgress?.(i, total, 'upload');
+    const { data } = await apiClient.post<ImageUploadResult>(
+      '/admin/products/upload-images',
+      buildBatchFormData(slice, strategy),
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000 },
+    );
+    acc.uploaded    += data.uploaded    ?? 0;
+    acc.matched     += data.matched     ?? 0;
+    acc.errors.push(...(data.errors      ?? []));
+    acc.imageResults.push(...(data.imageResults ?? []));
+    onProgress?.(i + slice.length, total, 'upload');
+  }
+
+  onProgress?.(total, total, 'processing');
+  return acc;
 }
 
 export async function exportProductsCsv(): Promise<void> {

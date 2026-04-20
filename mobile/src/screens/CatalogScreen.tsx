@@ -34,7 +34,7 @@ export default function CatalogScreen() {
     setError('');
     try {
       const res = await listProducts(pageNum, PAGE_SIZE);
-      const items: Product[] = Array.isArray(res) ? res : (res.data ?? []);
+      const items: Product[] = res.data ?? [];
       const tot = (res as any).total ?? items.length;
       setTotal(tot);
       setProducts((prev) => replace ? items : [...prev, ...items]);
@@ -94,6 +94,10 @@ export default function CatalogScreen() {
         contentContainerStyle={[styles.list, canEdit && styles.listWithFab]}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.3}
+        windowSize={10}
+        maxToRenderPerBatch={10}
+        initialNumToRender={10}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

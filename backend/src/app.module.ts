@@ -11,6 +11,8 @@ import { CommonModule } from './common/common.module';
 import { CorrelationIdMiddleware } from './common/correlation-id.middleware';
 import { ReindexModule } from './reindex/reindex.module';
 import { HealthModule } from './health/health.module';
+import { HierarchyModule } from './hierarchy/hierarchy.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -101,6 +103,8 @@ import { HealthModule } from './health/health.module';
     AdminModule,
     ReindexModule,
     HealthModule,
+    HierarchyModule,
+    DashboardModule,
   ],
 })
 export class AppModule implements NestModule {

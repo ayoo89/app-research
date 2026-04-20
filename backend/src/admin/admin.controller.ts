@@ -135,4 +135,22 @@ export class AdminController {
     const matchStrategy = strategy === 'order' ? 'order' : 'codegold';
     return this.adminService.importFromFile(files.file[0], files.images ?? [], matchStrategy);
   }
+
+  @Post('products/upload-images')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload images and match to existing products by codeGold or barcode filename convention' })
+  @UseInterceptors(FileFieldsInterceptor(
+    [{ name: 'images', maxCount: 200 }],
+    { limits: { fileSize: 10 * 1024 * 1024 } },
+  ))
+  uploadImages(
+    @UploadedFiles() files: { images?: Express.Multer.File[] },
+    @Body('strategy') strategy: string,
+  ) {
+    const imageFiles = files?.images ?? [];
+    if (imageFiles.length === 0) throw new BadRequestException('No images uploaded');
+    const matchStrategy = strategy === 'barcode' ? 'barcode' : 'codegold';
+    return this.adminService.uploadImagesToProducts(imageFiles, matchStrategy);
+  }
 }

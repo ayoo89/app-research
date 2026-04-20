@@ -27,6 +27,7 @@ function ProductCard({ item, query, onPress }: Props) {
           style={styles.thumb}
           contentFit="cover"
           priority="normal"
+          transition={200}
         />
       ) : (
         <View style={[styles.thumb, styles.thumbPlaceholder]}>
@@ -61,7 +62,7 @@ function ProductCard({ item, query, onPress }: Props) {
         {item.subcategory ? (
           <Text style={styles.subMeta} numberOfLines={1}>{item.subcategory}</Text>
         ) : null}
-        <MatchBadge methods={item.matchedBy ?? [item.matchType as any]} />
+        <MatchBadge methods={item.matchedBy?.length ? item.matchedBy : item.matchType ? [item.matchType as any] : []} />
       </View>
 
       <View style={styles.scoreCol}>

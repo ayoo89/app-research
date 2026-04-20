@@ -10,6 +10,9 @@ import { TaxonomyType } from '../taxonomy/taxonomy.entity';
 
 @Injectable()
 export class ProductService {
+  private readonly distinctCache = new Map<string, { values: string[]; ts: number }>();
+  private readonly DISTINCT_TTL = 5 * 60 * 1000; // 5 minutes
+
   constructor(
     @InjectRepository(Product) private repo: Repository<Product>,
     @InjectQueue('embedding') private embeddingQueue: Queue,
@@ -17,15 +20,46 @@ export class ProductService {
     private taxonomyService: TaxonomyService,
   ) {}
 
-  findAll(page = 1, limit = 20) {
-    return this.repo.findAndCount({
-      skip: (page - 1) * limit,
-      take: limit,
-      order: { createdAt: 'DESC' },
-    });
+  findAll(page = 1, limit = 20, search?: string, family?: string, subcategory?: string, category?: string) {
+    const qb = this.repo.createQueryBuilder('p')
+      .orderBy('p.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const conditions: string[] = [];
+    const params: Record<string, string> = {};
+
+    if (search?.trim()) {
+      const q = `%${search.trim().toLowerCase()}%`;
+      conditions.push(
+        `(LOWER(p.name) LIKE :q OR LOWER(COALESCE(p.codeGold,'')) LIKE :q OR LOWER(COALESCE(p.brand,'')) LIKE :q OR LOWER(COALESCE(p.barcode,'')) LIKE :q)`,
+      );
+      params.q = q;
+    }
+    if (family?.trim()) {
+      conditions.push(`LOWER(COALESCE(p.family,'')) = LOWER(:family)`);
+      params.family = family.trim();
+    }
+    if (subcategory?.trim()) {
+      conditions.push(`LOWER(COALESCE(p.subcategory,'')) = LOWER(:subcategory)`);
+      params.subcategory = subcategory.trim();
+    }
+    if (category?.trim()) {
+      conditions.push(`LOWER(COALESCE(p.category,'')) = LOWER(:category)`);
+      params.category = category.trim();
+    }
+
+    if (conditions.length > 0) {
+      qb.where(conditions.join(' AND '), params);
+    }
+
+    return qb.getManyAndCount();
   }
 
   async getDistinctValues(field: 'category' | 'family' | 'subcategory'): Promise<string[]> {
+    const hit = this.distinctCache.get(field);
+    if (hit && Date.now() - hit.ts < this.DISTINCT_TTL) return hit.values;
+
     const typeMap: Record<string, TaxonomyType> = {
       category: 'category', family: 'family', subcategory: 'subcategory',
     };
@@ -39,7 +73,12 @@ export class ProductService {
     ]);
     const fromProducts = rows.map((r: any) => r.value).filter(Boolean) as string[];
     const merged = Array.from(new Set([...fromProducts, ...taxonomyNames])).sort();
+    this.distinctCache.set(field, { values: merged, ts: Date.now() });
     return merged;
+  }
+
+  invalidateDistinctCache() {
+    this.distinctCache.clear();
   }
 
   findById(id: string) {
@@ -79,6 +118,7 @@ export class ProductService {
     const product = this.repo.create(data);
     const saved = await this.repo.save(product);
     await this.embeddingQueue.add('generate', { productId: saved.id });
+    this.invalidateDistinctCache();
     return saved;
   }
 
@@ -100,6 +140,7 @@ export class ProductService {
     if (!product) throw new NotFoundException('Product not found');
     await this.searchService.invalidateProductCache(product.barcode ?? undefined);
     await this.repo.remove(product);
+    this.invalidateDistinctCache();
   }
 
   async saveEmbedding(id: string, vector: number[]) {

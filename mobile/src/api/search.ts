@@ -49,6 +49,8 @@ export interface Product {
   subcategory: string | null;
   family: string | null;
   images: string[];
+  price: number | null;
+  stock: number | null;
   createdAt: string;
 }
 
@@ -71,12 +73,14 @@ function filtersBody(filters?: SearchFilters): { filters?: Record<string, string
 }
 
 async function imageToBase64(imagePath: string): Promise<string> {
+  // Resize to 512px wide, keeping aspect ratio — CLIP handles non-square internally
   const result = await ImageManipulator.manipulateAsync(
     imagePath,
-    [{ resize: { width: 512, height: 512 } }],
-    { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+    [{ resize: { width: 512 } }],
+    { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG, base64: true },
   );
-  return result.base64!;
+  if (!result.base64) throw new Error('Image encoding failed');
+  return result.base64;
 }
 
 export async function searchByBarcode(

@@ -114,8 +114,8 @@ android {
         applicationId 'com.productsearch.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.0"
+        versionCode 13
+        versionName "1.8.0"
     }
     signingConfigs {
         debug {

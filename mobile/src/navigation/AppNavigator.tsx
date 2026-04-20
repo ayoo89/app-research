@@ -18,6 +18,7 @@ import CatalogScreen from '../screens/CatalogScreen';
 import ProductFormScreen from '../screens/ProductFormScreen';
 import ImportExportScreen from '../screens/ImportExportScreen';
 import TaxonomyScreen from '../screens/TaxonomyScreen';
+import DashboardScreen from '../screens/DashboardScreen';
 import { colors, typography, hitSlop } from '../theme';
 
 const Stack = createNativeStackNavigator();
@@ -51,6 +52,17 @@ export default function AppNavigator() {
   const headerRight = useCallback(
     (navigate: (screen: string) => void) => () => (
       <View style={styles.headerBtns}>
+        {user?.role === 'super_admin' && (
+          <TouchableOpacity
+            onPress={() => navigate('Dashboard')}
+            style={styles.logoutBtn}
+            hitSlop={hitSlop}
+            accessibilityLabel={t('nav_dashboardA11y')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutText}>📊</Text>
+          </TouchableOpacity>
+        )}
         {user?.role === 'super_admin' && (
           <TouchableOpacity
             onPress={() => navigate('Users')}
@@ -214,6 +226,11 @@ export default function AppNavigator() {
                 name="Taxonomy"
                 component={TaxonomyScreen}
                 options={{ title: t('nav_taxonomy') }}
+              />
+              <Stack.Screen
+                name="Dashboard"
+                component={DashboardScreen}
+                options={{ title: t('nav_dashboard') }}
               />
             </>
           )}

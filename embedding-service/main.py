@@ -89,10 +89,19 @@ def _encode_text_clip(text: str) -> np.ndarray:
     vec = image_model.encode(text, normalize_embeddings=True, show_progress_bar=False)
     return _to_target_dim(vec)
 
+def _prepare_clip_image(img: Image.Image, max_long_side: int = 640) -> Image.Image:
+    """Scale down if oversized (aspect-ratio-preserved). CLIP's internal processor handles
+    the final 224×224 center-crop — do NOT pre-squash to a square."""
+    w, h = img.size
+    if max(w, h) > max_long_side:
+        scale = max_long_side / max(w, h)
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    return img
+
 def _encode_image(b64: str) -> np.ndarray:
     img_bytes = base64.b64decode(b64)
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    img = img.resize((224, 224), Image.LANCZOS)
+    img = _prepare_clip_image(img)          # scale down only; preserve aspect ratio
     vec = image_model.encode(img, normalize_embeddings=True, show_progress_bar=False)
     return _to_target_dim(vec)
 
@@ -176,17 +185,18 @@ def embed_image(req: ImageEmbedRequest):
 
 @app.post("/embed/hybrid", response_model=EmbedResponse)
 def embed_hybrid(req: HybridEmbedRequest):
-    """Fuse text + image embeddings in CLIP space via weighted average."""
+    """Fuse text + image embeddings in CLIP space.
+    Text is encoded with the CLIP text encoder so both vectors are in the same space."""
     if not req.text and not req.image:
         raise HTTPException(400, "Provide text and/or image")
     if req.text and req.image:
-        t_vec = _encode_text(req.text)
+        t_vec = _encode_text_clip(req.text)   # CLIP text → same 512-dim space as image
         i_vec = _encode_image(req.image)
         vec = _fuse(t_vec, i_vec, req.text_weight, 1 - req.text_weight)
     elif req.image:
         vec = _encode_image(req.image)
     else:
-        vec = _encode_text(req.text)
+        vec = _encode_text_clip(req.text)
     return {"embedding": vec.tolist(), "dim": len(vec)}
 
 

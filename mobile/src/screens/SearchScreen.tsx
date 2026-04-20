@@ -2,8 +2,9 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, TextInput, FlatList, StyleSheet,
   TouchableOpacity, Text, Keyboard, Platform,
-  ActivityIndicator, Modal, ScrollView,
+  ActivityIndicator, Modal, ScrollView, Alert, Linking,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,15 +30,18 @@ export default function SearchScreen() {
   const route      = useRoute<any>();
   const isOnline   = useNetworkStore((s) => s.isOnline);
 
-  const [query,   setQuery]   = useState('');
-  const [searchFocused, setSearchFocused] = useState(false);
+  const [query,          setQuery]          = useState('');
+  const [searchFocused,  setSearchFocused]  = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [phase,   setPhase]   = useState<SearchPhase>('idle');
-  const [meta,    setMeta]    = useState<SearchMeta | null>(null);
-  const [error,   setError]   = useState('');
+  const [results,        setResults]        = useState<SearchResult[]>([]);
+  const [phase,          setPhase]          = useState<SearchPhase>('idle');
+  const [meta,           setMeta]           = useState<SearchMeta | null>(null);
+  const [error,          setError]          = useState('');
+  const [searchedImageUri, setSearchedImageUri] = useState<string | null>(null);
+
   const inputRef    = useRef<TextInput>(null);
   const lastQuery   = useRef('');
+  const lastImageUri = useRef('');
   const wasOffline  = useRef(false);
 
   const [filterCategory,    setFilterCategory]    = useState('');
@@ -48,10 +52,10 @@ export default function SearchScreen() {
   const [filterEan,         setFilterEan]         = useState('');
 
   // Taxonomy picker state
-  const [categories,   setCategories]   = useState<string[]>([]);
-  const [families,     setFamilies]     = useState<string[]>([]);
+  const [categories,    setCategories]    = useState<string[]>([]);
+  const [families,      setFamilies]      = useState<string[]>([]);
   const [subcategories, setSubcategories] = useState<string[]>([]);
-  const [pickerField, setPickerField]   = useState<'category' | 'family' | 'subcategory' | null>(null);
+  const [pickerField,   setPickerField]   = useState<'category' | 'family' | 'subcategory' | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -89,20 +93,17 @@ export default function SearchScreen() {
     [filterCategory, filterSubcategory, filterFamily, filterCodeGold, filterDesignation, filterEan],
   );
 
-  // Retry last search when coming back online
+  const [lastSearchType, setLastSearchType] = useState<'text' | 'barcode' | 'image'>('text');
+
+  // Retry when back online
   useEffect(() => {
-    if (!isOnline) {
-      wasOffline.current = true;
-      return;
-    }
+    if (!isOnline) { wasOffline.current = true; return; }
     if (wasOffline.current && lastQuery.current) {
       wasOffline.current = false;
       runTextSearch(lastQuery.current);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
-
-  const [lastSearchType, setLastSearchType] = useState<'text' | 'barcode' | 'image'>('text');
 
   // ── Search handlers ─────────────────────────────────────────────
 
@@ -111,6 +112,7 @@ export default function SearchScreen() {
     Keyboard.dismiss();
     lastQuery.current = text.trim();
     setLastSearchType('text');
+    setSearchedImageUri(null);
     setPhase('searching');
     setError('');
     try {
@@ -130,6 +132,7 @@ export default function SearchScreen() {
     const filters = filtersOverride ?? activeFilters;
     lastQuery.current = barcode;
     setLastSearchType('barcode');
+    setSearchedImageUri(null);
     setPhase('searching');
     setError('');
     try {
@@ -144,22 +147,92 @@ export default function SearchScreen() {
     }
   }, [isOnline, activeFilters, t]);
 
-  const lastImageUri = useRef('');
+  // ── Permission helper ────────────────────────────────────────────
+  const requestPermission = useCallback(async (
+    source: 'camera' | 'gallery',
+  ): Promise<boolean> => {
+    if (source === 'camera') {
+      const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status === 'granted') return true;
+      Alert.alert(
+        t('search_perm_camera_title'),
+        t('search_perm_camera_body'),
+        [
+          { text: t('common_cancel'), style: 'cancel' },
+          ...(!canAskAgain
+            ? [{ text: t('search_perm_open_settings'), onPress: () => Linking.openSettings() }]
+            : []),
+        ],
+      );
+      return false;
+    } else {
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status === 'granted') return true;
+      Alert.alert(
+        t('search_perm_gallery_title'),
+        t('search_perm_gallery_body'),
+        [
+          { text: t('common_cancel'), style: 'cancel' },
+          ...(!canAskAgain
+            ? [{ text: t('search_perm_open_settings'), onPress: () => Linking.openSettings() }]
+            : []),
+        ],
+      );
+      return false;
+    }
+  }, [t]);
+
+  // ── Image search ─────────────────────────────────────────────────
   const runImageSearch = useCallback(async (uri?: string) => {
     if (!isOnline) return;
     let imageUri = uri;
+
     if (!imageUri) {
-      const picked = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
+      // Step 1 — choose source
+      const choice = await new Promise<'camera' | 'gallery' | 'cancel'>((resolve) => {
+        Alert.alert(
+          t('search_image_source_title'),
+          undefined,
+          [
+            { text: t('search_image_source_camera'),  onPress: () => resolve('camera') },
+            { text: t('search_image_source_gallery'), onPress: () => resolve('gallery') },
+            { text: t('common_cancel'), style: 'cancel', onPress: () => resolve('cancel') },
+          ],
+        );
       });
-      if (picked.canceled || !picked.assets?.[0]?.uri) return;
-      imageUri = picked.assets[0].uri;
+      if (choice === 'cancel') return;
+
+      // Step 2 — check & request permission
+      const granted = await requestPermission(choice);
+      if (!granted) return;
+
+      // Step 3 — launch picker
+      if (choice === 'camera') {
+        const picked = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.9,
+          allowsEditing: true,
+        });
+        if (picked.canceled || !picked.assets?.[0]?.uri) return;
+        imageUri = picked.assets[0].uri;
+      } else {
+        const picked = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.9,
+          allowsEditing: false,
+        });
+        if (picked.canceled || !picked.assets?.[0]?.uri) return;
+        imageUri = picked.assets[0].uri;
+      }
     }
+
+    // Step 4 — run search
     lastImageUri.current = imageUri;
+    setSearchedImageUri(imageUri);
     setLastSearchType('image');
     setPhase('searching');
     setError('');
+    setResults([]);
     lastQuery.current = '';
     try {
       const res = await searchByImage(imageUri, activeFilters);
@@ -171,14 +244,13 @@ export default function SearchScreen() {
     } finally {
       setPhase('done');
     }
-  }, [isOnline, activeFilters, t]);
+  }, [isOnline, activeFilters, t, requestPermission]);
 
-  // Code-barres / QR depuis le scanner (+ filtres passés en paramètres de navigation)
+  // Barcode / QR from scanner with optional filters
   useEffect(() => {
     const bc = route.params?.barcode as string | undefined;
     const rf = route.params?.filters as SearchFilters | undefined;
-    const rfHas =
-      !!(rf?.category?.trim() || rf?.subcategory?.trim() || rf?.family?.trim());
+    const rfHas = !!(rf?.category?.trim() || rf?.subcategory?.trim() || rf?.family?.trim());
     if (rfHas) {
       setFilterCategory(rf!.category ?? '');
       setFilterSubcategory(rf!.subcategory ?? '');
@@ -187,16 +259,15 @@ export default function SearchScreen() {
     }
     if (bc) {
       setQuery(bc);
-      // rf explicite depuis le scanner ; sinon `runBarcodeSearch` applique `activeFilters` courants
       runBarcodeSearch(bc, rfHas ? rf : undefined);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.barcode, route.params?.filters]);
 
   const retryLastSearch = useCallback(() => {
-    if (lastSearchType === 'text' && lastQuery.current) runTextSearch(lastQuery.current);
+    if (lastSearchType === 'text'    && lastQuery.current)    runTextSearch(lastQuery.current);
     else if (lastSearchType === 'barcode' && lastQuery.current) runBarcodeSearch(lastQuery.current);
-    else if (lastSearchType === 'image' && lastImageUri.current) runImageSearch(lastImageUri.current);
+    else if (lastSearchType === 'image'  && lastImageUri.current) runImageSearch(lastImageUri.current);
   }, [lastSearchType, runTextSearch, runBarcodeSearch, runImageSearch]);
 
   const clearSearch = () => {
@@ -205,7 +276,9 @@ export default function SearchScreen() {
     setPhase('idle');
     setError('');
     setMeta(null);
+    setSearchedImageUri(null);
     lastQuery.current = '';
+    lastImageUri.current = '';
     inputRef.current?.focus();
   };
 
@@ -213,17 +286,15 @@ export default function SearchScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: SearchResult; index: number }) => (
-      <Animated.View
-        entering={FadeInDown.duration(400).delay(Math.min(index * 48, 400))}
-      >
+      <Animated.View entering={FadeInDown.duration(400).delay(Math.min(index * 48, 400))}>
         <ProductCard
           item={item}
-          query={lastQuery.current}
+          query={lastSearchType === 'image' ? '' : lastQuery.current}
           onPress={() => navigation.navigate('ProductDetail', { id: item.id })}
         />
       </Animated.View>
     ),
-    [navigation],
+    [navigation, lastSearchType],
   );
 
   const ListHeader = () => (
@@ -233,6 +304,7 @@ export default function SearchScreen() {
           <Text style={styles.metaText}>
             {results.length}{' '}
             {results.length === 1 ? t('search_word_result') : t('search_word_results')}
+            {lastSearchType === 'image' ? '  · 🔍 visual' : ''}
             {meta.cacheHit ? `  · ${t('search_meta_cache')}` : ''}
             {'  ·  '}{meta.totalMs} ms
           </Text>
@@ -254,13 +326,23 @@ export default function SearchScreen() {
         />
       );
     }
+    // image search with no results — give specific guidance
+    if (lastSearchType === 'image') {
+      return (
+        <EmptyState
+          icon="📷"
+          title={t('search_noResults_title')}
+          subtitle={t('search_image_no_results')}
+          actionLabel={t('search_image_banner_change')}
+          onAction={() => runImageSearch()}
+        />
+      );
+    }
     return (
       <EmptyState
         icon="📭"
         title={t('search_noResults_title')}
-        subtitle={t('search_noMatch', {
-          query: lastQuery.current || t('search_yourSearch'),
-        })}
+        subtitle={t('search_noMatch', { query: lastQuery.current || t('search_yourSearch') })}
         actionLabel={t('search_reset')}
         onAction={clearSearch}
       />
@@ -271,13 +353,9 @@ export default function SearchScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {!isOnline && <OfflineBanner />}
 
-      {/* Search bar */}
+      {/* ── Search bar ────────────────────────────────────────────── */}
       <View style={[styles.searchBar, shadow.sm]}>
-        <View style={[
-          styles.inputWrap,
-          searchFocused && styles.inputWrapFocused,
-        ]}
-        >
+        <View style={[styles.inputWrap, searchFocused && styles.inputWrapFocused]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             ref={inputRef}
@@ -302,7 +380,11 @@ export default function SearchScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.iconBtn, !isOnline && styles.iconBtnDisabled]}
+          style={[
+            styles.iconBtn,
+            searchedImageUri && styles.iconBtnImageActive,
+            !isOnline && styles.iconBtnDisabled,
+          ]}
           onPress={() => runImageSearch()}
           disabled={!isOnline}
           hitSlop={hitSlop}
@@ -324,7 +406,7 @@ export default function SearchScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Filtres repliables (ERP) */}
+      {/* ── Filter bar ───────────────────────────────────────────── */}
       <View style={styles.filtersBlock}>
         <TouchableOpacity
           style={styles.filtersToggle}
@@ -345,7 +427,6 @@ export default function SearchScreen() {
         {filtersExpanded ? (
           <>
             <View style={styles.filterInputs}>
-              {/* Category select */}
               <TouchableOpacity
                 style={[styles.filterSelect, filterCategory ? styles.filterSelectActive : null]}
                 onPress={() => setPickerField('category')}
@@ -358,7 +439,6 @@ export default function SearchScreen() {
                 <Text style={styles.filterSelectChevron}>▾</Text>
               </TouchableOpacity>
 
-              {/* Family select */}
               <TouchableOpacity
                 style={[styles.filterSelect, filterFamily ? styles.filterSelectActive : null]}
                 onPress={() => setPickerField('family')}
@@ -371,7 +451,6 @@ export default function SearchScreen() {
                 <Text style={styles.filterSelectChevron}>▾</Text>
               </TouchableOpacity>
 
-              {/* Sub-family select */}
               <TouchableOpacity
                 style={[styles.filterSelect, filterSubcategory ? styles.filterSelectActive : null]}
                 onPress={() => setPickerField('subcategory')}
@@ -383,6 +462,7 @@ export default function SearchScreen() {
                 </Text>
                 <Text style={styles.filterSelectChevron}>▾</Text>
               </TouchableOpacity>
+
               <TextInput
                 style={styles.filterInput}
                 placeholder={t('search_placeholder_codegold')}
@@ -435,16 +515,54 @@ export default function SearchScreen() {
         ) : null}
       </View>
 
+      {/* ── Image search banner ───────────────────────────────────── */}
+      {searchedImageUri ? (
+        <View style={styles.imageBanner}>
+          <Image
+            source={{ uri: searchedImageUri }}
+            style={styles.imageBannerThumb}
+            contentFit="cover"
+            transition={150}
+          />
+          <View style={styles.imageBannerBody}>
+            <Text style={styles.imageBannerLabel}>{t('search_image_banner_label')}</Text>
+            {phase === 'searching' ? (
+              <View style={styles.imageBannerSearchingRow}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.imageBannerSearchingText}>{t('search_searching')}</Text>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={() => runImageSearch()} activeOpacity={0.7}>
+                <Text style={styles.imageBannerChange}>{t('search_image_banner_change')}</Text>
+              </TouchableOpacity>
+            )}
+            {phase === 'done' && results.length > 0 && (
+              <Text style={styles.imageBannerCount}>
+                {t('search_image_banner_results').replace('{n}', String(results.length))}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={clearSearch}
+            style={styles.imageBannerClose}
+            hitSlop={hitSlop}
+            accessibilityLabel={t('search_a11y_clear')}
+          >
+            <Text style={styles.imageBannerCloseIcon}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {error ? <ErrorBanner message={error} onRetry={retryLastSearch} /> : null}
 
-      {phase === 'searching' && (
+      {phase === 'searching' && !searchedImageUri && (
         <View style={styles.searchingBanner}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.searchingText}>{t('search_searching')}</Text>
         </View>
       )}
 
-      {/* Results */}
+      {/* ── Results ──────────────────────────────────────────────── */}
       <FlatList
         data={results}
         keyExtractor={(item) => item.id}
@@ -459,7 +577,7 @@ export default function SearchScreen() {
         initialNumToRender={8}
       />
 
-      {/* Taxonomy picker modal */}
+      {/* ── Taxonomy picker modal ─────────────────────────────────── */}
       <Modal
         visible={pickerField !== null}
         transparent
@@ -485,7 +603,6 @@ export default function SearchScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" style={styles.pickerScroll}>
-              {/* Clear option */}
               <TouchableOpacity
                 style={styles.pickerOption}
                 onPress={() => {
@@ -499,8 +616,8 @@ export default function SearchScreen() {
               </TouchableOpacity>
               {(pickerField === 'category' ? categories : pickerField === 'family' ? families : subcategories).map((opt) => {
                 const selected =
-                  pickerField === 'category' ? filterCategory === opt
-                  : pickerField === 'family' ? filterFamily === opt
+                  pickerField === 'category'   ? filterCategory   === opt
+                  : pickerField === 'family'   ? filterFamily     === opt
                   : filterSubcategory === opt;
                 return (
                   <TouchableOpacity
@@ -528,12 +645,14 @@ export default function SearchScreen() {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe:        { flex: 1, backgroundColor: colors.bg },
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.surface, paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm, gap: spacing.sm,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.sm,
   },
   inputWrap: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
@@ -541,170 +660,109 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: colors.border,
     paddingHorizontal: spacing.sm,
   },
-  inputWrapFocused: {
-    borderColor: colors.borderFocus,
-    backgroundColor: colors.surface,
-  },
-  searchIcon:  { fontSize: 16, marginRight: spacing.xs },
+  inputWrapFocused: { borderColor: colors.borderFocus, backgroundColor: colors.surface },
+  searchIcon: { fontSize: 16, marginRight: spacing.xs },
   input: {
-    flex: 1, paddingVertical: Platform.OS === 'ios' ? spacing.md : spacing.sm,
+    flex: 1,
+    paddingVertical: Platform.OS === 'ios' ? spacing.md : spacing.sm,
     fontSize: 15, color: colors.text,
   },
-  clearBtn:    { padding: spacing.xs },
-  clearIcon:   { fontSize: 14, color: colors.textMuted },
+  clearBtn:  { padding: spacing.xs },
+  clearIcon: { fontSize: 14, color: colors.textMuted },
   iconBtn: {
     width: 44, height: 44, borderRadius: radius.md,
     backgroundColor: colors.bg, borderWidth: 1.5, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center',
   },
-  iconBtnPrimary:  { backgroundColor: colors.primaryLight, borderColor: colors.primary },
-  iconBtnDisabled: { opacity: 0.4 },
-  iconBtnText:     { fontSize: 18 },
+  iconBtnPrimary:     { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  iconBtnImageActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  iconBtnDisabled:    { opacity: 0.4 },
+  iconBtnText:        { fontSize: 18 },
+
   filtersBlock: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    paddingTop: spacing.xs,
+    paddingHorizontal: spacing.md, paddingBottom: spacing.sm, paddingTop: spacing.xs,
     backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   filtersToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.xs,
   },
-  filtersToggleText: {
-    ...typography.small,
-    color: colors.primary,
-    fontWeight: '600',
-    flex: 1,
-  },
+  filtersToggleText: { ...typography.small, color: colors.primary, fontWeight: '600', flex: 1 },
   filterBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-    marginLeft: spacing.sm,
+    minWidth: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, marginLeft: spacing.sm,
   },
-  filterBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  filterInputs: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
+  filterBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  filterInputs:    { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
   filterInput: {
-    flex: 1,
-    minWidth: 88,
-    backgroundColor: colors.bg,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    flex: 1, minWidth: 88, backgroundColor: colors.bg,
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: spacing.sm,
     paddingVertical: Platform.OS === 'ios' ? spacing.sm : spacing.xs,
-    fontSize: 13,
-    color: colors.text,
+    fontSize: 13, color: colors.text,
   },
-  clearFiltersText: {
-    ...typography.caption,
-    color: colors.primary,
-    marginTop: spacing.xs,
-    fontWeight: '600',
-  },
+  clearFiltersText: { ...typography.caption, color: colors.primary, marginTop: spacing.xs, fontWeight: '600' },
   filterSelect: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    minWidth: 88,
-    backgroundColor: colors.bg,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    flexDirection: 'row', alignItems: 'center',
+    flex: 1, minWidth: 88, backgroundColor: colors.bg,
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: spacing.sm,
     paddingVertical: Platform.OS === 'ios' ? spacing.sm : spacing.xs,
   },
-  filterSelectActive: {
-    borderColor: colors.primary,
+  filterSelectActive:      { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  filterSelectPlaceholder: { flex: 1, fontSize: 13, color: colors.placeholder },
+  filterSelectValueText:   { flex: 1, fontSize: 13, color: colors.text, fontWeight: '600' },
+  filterSelectChevron:     { fontSize: 11, color: colors.textMuted, marginLeft: 2 },
+
+  // Image search banner
+  imageBanner: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.primaryLight,
+    borderBottomWidth: 1, borderBottomColor: colors.primary + '40',
+    paddingRight: spacing.md,
   },
-  filterSelectPlaceholder: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.placeholder,
-  },
-  filterSelectValueText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  filterSelectChevron: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginLeft: 2,
-  },
-  pickerOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
+  imageBannerThumb:          { width: 60, height: 60 },
+  imageBannerBody:           { flex: 1, paddingHorizontal: spacing.md, gap: spacing.xs },
+  imageBannerLabel:          { ...typography.label, color: colors.primary },
+  imageBannerSearchingRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  imageBannerSearchingText:  { ...typography.small, color: colors.primary },
+  imageBannerChange:         { ...typography.small, color: colors.primary, fontWeight: '700', textDecorationLine: 'underline' },
+  imageBannerCount:          { ...typography.caption, color: colors.primaryDark },
+  imageBannerClose:          { padding: spacing.sm },
+  imageBannerCloseIcon:      { fontSize: 16, color: colors.primary, fontWeight: '700' },
+
+  pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   pickerSheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     maxHeight: '60%',
   },
   pickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl, paddingVertical: spacing.md,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   pickerTitle: { ...typography.h3, color: colors.text },
   pickerClose: { fontSize: 16, color: colors.textMuted, padding: spacing.xs },
   pickerScroll: { paddingVertical: spacing.xs },
   pickerOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: spacing.xl, paddingVertical: spacing.md,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  pickerOptionSelected: { backgroundColor: colors.primaryLight },
-  pickerOptionClear: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  pickerOptionText: { flex: 1, fontSize: 14, color: colors.text },
+  pickerOptionSelected:     { backgroundColor: colors.primaryLight },
+  pickerOptionClear:        { flex: 1, fontSize: 14, color: colors.primary, fontWeight: '600' },
+  pickerOptionText:         { flex: 1, fontSize: 14, color: colors.text },
   pickerOptionTextSelected: { color: colors.primary, fontWeight: '700' },
-  pickerCheck: { fontSize: 14, color: colors.primary },
+  pickerCheck:              { fontSize: 14, color: colors.primary },
+
   searchingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.primaryLight,
-    paddingVertical: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: colors.primaryLight, paddingVertical: spacing.sm,
   },
   searchingText: { ...typography.small, color: colors.primary, fontWeight: '600' },
-  metaRow: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
-  },
+  metaRow:       { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   metaText:      { ...typography.caption, color: colors.textMuted },
   listContent:   { paddingBottom: spacing.xxl },
   emptyContainer: { flexGrow: 1 },

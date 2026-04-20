@@ -8,13 +8,10 @@ export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index()
   @Column()
   name: string;
 
-  /**
-   * Référence interne ERP (ex. « CODE GOLD »).
-   * Recherche scan / texte comme l’EAN.
-   */
   @Index({ unique: true, where: '"codeGold" IS NOT NULL' })
   @Column({ nullable: true })
   codeGold: string;
@@ -29,24 +26,27 @@ export class Product {
   @Column({ type: 'text', nullable: true })
   description: string;
 
+  @Index()
   @Column({ nullable: true })
   category: string;
 
-  /**
-   * Sous-famille ERP (colonne « Sous-Famille »), ex. FLEUR ARTIFICIELLE.
-   * Hiérarchie : catégorie → famille → sous-famille.
-   */
+  @Index()
   @Column({ nullable: true })
   subcategory: string;
 
-  /** Famille ERP (colonne « Famille »), ex. ART FLORAL. */
+  @Index()
   @Column({ nullable: true })
   family: string;
 
   @Column({ type: 'jsonb', default: [] })
   images: string[];
 
-  // Stored as float array; actual vector search done via Elasticsearch or pgvector
+  @Column({ type: 'float', nullable: true })
+  price: number;
+
+  @Column({ type: 'int', nullable: true })
+  stock: number;
+
   @Column({ type: 'float', array: true, nullable: true, select: false })
   embeddingVector: number[];
 

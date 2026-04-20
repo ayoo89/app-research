@@ -8,6 +8,7 @@ import { Product } from '../product/product.entity';
 import { EmbeddingService } from '../product/embedding.service';
 import { MetricsService } from '../common/metrics.service';
 import { REDIS_CLIENT } from './cache.module';
+import { SearchEventService } from '../dashboard/search-event.service';
 import {
   SearchRequest, SearchResponse, SearchResult,
   MatchMethod, ScoringWeights, DEFAULT_WEIGHTS,
@@ -17,6 +18,7 @@ import {
 const CACHE_TTL_TEXT    = 300;   // 5 min
 const CACHE_TTL_BARCODE = 60;    // 60s — barcode hits are deterministic
 const CACHE_TTL_EMBED   = 3600;  // 1 hr
+const CACHE_TTL_IMAGE   = 300;   // 5 min — image results (embedding itself cached 1hr)
 const TOP_N           = 50;
 const MAX_SCAN_PAYLOAD = 2048;
 
@@ -38,6 +40,7 @@ export class SearchService {
     private embeddingService: EmbeddingService,
     private metrics: MetricsService,
     @Inject(REDIS_CLIENT) private redis: Redis,
+    private searchEventService: SearchEventService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────
@@ -50,12 +53,33 @@ export class SearchService {
     const limit   = Math.min(req.limit ?? 20, 50);
 
     // ── Cache check ───────────────────────────────────────────────
+    // Image searches use a content-hash key; text/barcode use the query-based key
+    let imageCacheKey: string | null = null;
+    if (req.imageBase64) {
+      const imgHash = crypto.createHash('sha256').update(req.imageBase64.slice(0, 2000)).digest('hex');
+      imageCacheKey = `search:img:${imgHash}`;
+      try {
+        const raw = await this.redis.get(imageCacheKey);
+        if (raw) {
+          const imgCached: SearchResponse = JSON.parse(raw);
+          const hitMs = Date.now() - start;
+          this.metrics.increment('search_cache_hits_total');
+          this.metrics.observe('search_latency_ms', hitMs, { cache: 'hit' });
+          this.searchEventService.log('image', null, imgCached.results[0]?.id ?? null, hitMs, true).catch(() => {});
+          return { ...imgCached, meta: { ...imgCached.meta, totalMs: hitMs, cacheHit: true } };
+        }
+      } catch { /* ignore */ }
+    }
+
     const cacheKey = this.buildCacheKey(req);
     const cached   = await this.tryCache(cacheKey, req);
     if (cached) {
       this.metrics.increment('search_cache_hits_total');
       this.metrics.observe('search_latency_ms', Date.now() - start, { cache: 'hit' });
-      return { ...cached, meta: { ...cached.meta, totalMs: Date.now() - start, cacheHit: true } };
+      const hitMs = Date.now() - start;
+      const searchType = req.imageBase64 ? 'image' : req.barcode ? 'barcode' : 'text';
+      this.searchEventService.log(searchType, req.text ?? req.barcode ?? null, cached.results[0]?.id ?? null, hitMs, true).catch(() => {});
+      return { ...cached, meta: { ...cached.meta, totalMs: hitMs, cacheHit: true } };
     }
     this.metrics.increment('search_cache_misses_total');
 
@@ -84,6 +108,10 @@ export class SearchService {
       this.redis.setex(cacheKey, CACHE_TTL_TEXT, JSON.stringify(response))
         .catch((err) => this.logger.warn(`Cache write failed: ${err.message}`));
     }
+    if (imageCacheKey && results.length > 0) {
+      this.redis.setex(imageCacheKey, CACHE_TTL_IMAGE, JSON.stringify(response))
+        .catch((err) => this.logger.warn(`Image cache write failed: ${err.message}`));
+    }
 
     // ── Metrics ───────────────────────────────────────────────────
     this.metrics.observe('search_latency_ms', totalMs, { cache: 'miss' });
@@ -101,6 +129,14 @@ export class SearchService {
       totalMs,
       cacheHit: false,
     }));
+
+    // ── Async event logging + top-products tracking ────────────────
+    const searchType = req.imageBase64 ? 'image' : req.barcode ? 'barcode' : 'text';
+    const topMatchId = results[0]?.id ?? null;
+    this.searchEventService.log(searchType, req.text ?? req.barcode ?? null, topMatchId, totalMs, false).catch(() => {});
+    if (topMatchId) {
+      this.redis.zincrby('top_products', 1, topMatchId).catch(() => {});
+    }
 
     return response;
   }
@@ -150,7 +186,11 @@ export class SearchService {
     if (textResults.length)   methods.push('text');
     if (vectorResults.length) methods.push('vector');
 
-    return { results: this.mergeAndRank([...textResults, ...vectorResults], weights, limit), methods };
+    const merged = this.mergeAndRank([...textResults, ...vectorResults], weights, limit);
+    // For pure image search, products in the same family are often the correct answer —
+    // don't aggressively diversify. Use a higher cap (8) vs text search (3).
+    const isImageOnly = !!req.imageBase64 && !req.text?.trim();
+    return { results: this.diversify(merged, isImageOnly ? 8 : 3), methods };
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -300,6 +340,8 @@ export class SearchService {
       // Safe: embedding values are always finite floats produced by our own CLIP service.
       const safeVec = embedding.map((v) => (Number.isFinite(v) ? v : 0));
       const vecLiteral = `ARRAY[${safeVec.join(',')}]::float8[]`;
+      // Fetch more candidates for pure image search — stricter threshold filters more out
+      const candidateLimit = fallbackText?.trim() ? limit * 3 : limit * 5;
       const rows = await Promise.race([
         this.productRepo.query(
           `SELECT p.id, p.name, p.brand, p."codeGold", p.barcode,
@@ -312,7 +354,7 @@ export class SearchService {
            ORDER BY (SELECT COALESCE(SUM(pv * qv), 0)
                      FROM UNNEST(p."embeddingVector", ${vecLiteral}) AS t(pv, qv)) DESC NULLS LAST
            LIMIT $1`,
-          [limit * 3],
+          [candidateLimit],
         ),
         this.timeout<any[]>(4000, 'vector-search'),
       ]);
@@ -320,17 +362,23 @@ export class SearchService {
       this.metrics.observe('search_vector_latency_ms', Date.now() - t0);
       this.circuit.failures = 0;
 
-      // CLIP image↔text cosine similarity is typically 0.15–0.35 for semantically related pairs
-      const MIN_VECTOR_SCORE = 0.15;
+      // Pure image↔image cosine similarity is higher (0.4–0.9) than text↔image (0.15–0.35).
+      // Use a stricter threshold for image-only to filter noise; relax for text+image hybrid.
+      const isHybrid = !!fallbackText?.trim();
+      const MIN_SCORE = isHybrid ? 0.15 : 0.22;
       const scored = (rows as any[]).map((row) => ({ ...row, _score: parseFloat(row.vector_score) }));
       this.logger.log(`Vector scores top-5: ${scored.slice(0, 5).map(r => `${r.codeGold}=${r._score.toFixed(4)}`).join(', ')}`);
-      return scored
-        .filter((row) => row._score >= MIN_VECTOR_SCORE)
-        .filter((row) => this.productMatchesFilters(row, filters))
+      const filtered = scored
+        .filter((row) => row._score >= MIN_SCORE)
+        .filter((row) => this.productMatchesFilters(row, filters));
+
+      // Normalise scores so top result = weights.vector (consistent relative ranking)
+      const topScore = filtered[0]?._score ?? 1;
+      return filtered
         .slice(0, limit)
         .map((row) => this.toResult(
           row,
-          row._score * weights.vector,
+          Math.min(1.0, (row._score / topScore) * weights.vector),
           ['vector'],
           { vectorScore: row._score },
         ));
@@ -471,6 +519,17 @@ export class SearchService {
       matchedBy,
       debug,
     };
+  }
+
+  private diversify(results: SearchResult[], maxPerFamily = 3): SearchResult[] {
+    const counts = new Map<string, number>();
+    return results.filter((r) => {
+      const key = r.family ?? '__none__';
+      const count = counts.get(key) ?? 0;
+      if (count >= maxPerFamily) return false;
+      counts.set(key, count + 1);
+      return true;
+    });
   }
 
   private async tryCache(key: string, req: SearchRequest): Promise<SearchResponse | null> {
