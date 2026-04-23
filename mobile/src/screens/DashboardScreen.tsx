@@ -72,7 +72,17 @@ export default function DashboardScreen() {
       setStats(data);
       setLastUpdated(new Date());
     } catch (e: any) {
-      setError(e.message ?? t('dashboard_error'));
+      // e.message may be an object when the API returns a structured error — always stringify
+      const raw = e.response?.data?.message ?? e.message ?? t('dashboard_error');
+      const msg = typeof raw === 'string' ? raw
+        : Array.isArray(raw) ? raw[0]
+        : typeof raw === 'object' ? (raw.message ?? JSON.stringify(raw))
+        : String(raw);
+      // 404 means the API hasn't been deployed with the new routes yet
+      const status = e.response?.status;
+      setError(status === 404
+        ? 'Tableau de bord non disponible — le serveur doit être redéployé avec la nouvelle version.'
+        : msg);
     } finally {
       setLoading(false);
       setRefreshing(false);

@@ -58,8 +58,11 @@ export default function TaxonomyScreen() {
         setSubFamilies(sfs);
         setFamilies(fams);
       }
-    } catch {
-      setError(t('taxonomy_error_load'));
+    } catch (e: any) {
+      const status = e.response?.status;
+      setError(status === 404
+        ? 'Hiérarchie non disponible — le serveur doit être redéployé avec la nouvelle version.'
+        : t('taxonomy_error_load'));
     } finally {
       setLoading(false);
     }

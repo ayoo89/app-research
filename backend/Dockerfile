@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Force rebuild by including a build timestamp arg
+ARG BUILD_DATE=unknown
 RUN npm run build
 
 FROM node:20-alpine
