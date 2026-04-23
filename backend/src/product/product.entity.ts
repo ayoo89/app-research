@@ -1,7 +1,9 @@
 import {
   Entity, PrimaryGeneratedColumn, Column,
   CreateDateColumn, UpdateDateColumn, Index,
+  ManyToOne, JoinColumn,
 } from 'typeorm';
+import { CategoryEntity } from '../hierarchy/category.entity';
 
 @Entity('products')
 export class Product {
@@ -37,6 +39,14 @@ export class Product {
   @Index()
   @Column({ nullable: true })
   family: string;
+
+  @Index()
+  @Column({ nullable: true })
+  categoryId: string;
+
+  @ManyToOne(() => CategoryEntity, { nullable: true, onDelete: 'SET NULL', eager: false })
+  @JoinColumn({ name: 'categoryId' })
+  categoryEntity: CategoryEntity;
 
   @Column({ type: 'jsonb', default: [] })
   images: string[];

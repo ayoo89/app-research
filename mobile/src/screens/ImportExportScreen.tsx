@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import {
   exportProductsCsv, importProductsCsv, uploadProductImages,
@@ -161,43 +162,67 @@ export default function ImportExportScreen() {
     }
   };
 
-  // ── Pick images (CSV import) ─────────────────────────────────────────
+  // ── Pick images (CSV import) — opens native gallery with multi-select ──
   const pickImages = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/jpeg', 'image/png', 'image/webp', 'image/*'],
-        multiple: true, copyToCacheDirectory: true,
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission requise',
+          'Autorisez l\'accès à la galerie pour sélectionner des photos.',
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: 0, // 0 = unlimited
+        quality: 1,
+        exif: false,
       });
       if (result.canceled || !result.assets?.length) return;
       const picked = result.assets.map((a) => ({
-        uri: a.uri, name: a.name ?? a.uri.split('/').pop() ?? 'image.jpg',
+        uri: a.uri,
+        name: a.fileName ?? a.uri.split('/').pop() ?? 'image.jpg',
       }));
       setImageFiles((prev) => {
         const seen = new Set(prev.map((f) => f.uri));
         return [...prev, ...picked.filter((f) => !seen.has(f.uri))];
       });
     } catch (e: any) {
-      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') Alert.alert(t('common_error'), e.message);
+      Alert.alert(t('common_error'), e.message);
     }
   };
 
-  // ── Pick images (standalone upload) ─────────────────────────────────
+  // ── Pick images (standalone upload) — opens native gallery with multi-select ─
   const pickImgOnly = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/jpeg', 'image/png', 'image/webp', 'image/*'],
-        multiple: true, copyToCacheDirectory: true,
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission requise',
+          'Autorisez l\'accès à la galerie pour sélectionner des photos.',
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: 0, // 0 = unlimited
+        quality: 1,
+        exif: false,
       });
       if (result.canceled || !result.assets?.length) return;
       const picked = result.assets.map((a) => ({
-        uri: a.uri, name: a.name ?? a.uri.split('/').pop() ?? 'image.jpg',
+        uri: a.uri,
+        name: a.fileName ?? a.uri.split('/').pop() ?? 'image.jpg',
       }));
       setImgOnlyFiles((prev) => {
         const seen = new Set(prev.map((f) => f.uri));
         return [...prev, ...picked.filter((f) => !seen.has(f.uri))];
       });
     } catch (e: any) {
-      if (e?.code !== 'DOCUMENT_PICKER_CANCELED') Alert.alert(t('common_error'), e.message);
+      Alert.alert(t('common_error'), e.message);
     }
   };
 
@@ -395,11 +420,11 @@ export default function ImportExportScreen() {
             <TouchableOpacity style={styles.pickerRow} onPress={pickImages}>
               <View style={styles.pickerIcon}><Text style={styles.pickerEmoji}>🖼️</Text></View>
               <View style={styles.pickerInfo}>
-                <Text style={styles.pickerLabel}>{t('import_export_import_pick_images')}</Text>
+                <Text style={styles.pickerLabel}>Photos produits (galerie)</Text>
                 <Text style={[styles.pickerValue, !hasImages && styles.pickerValueEmpty]} numberOfLines={1}>
                   {hasImages
-                    ? t('import_export_import_images_count', { count: String(imageFiles.length) })
-                    : t('import_export_import_images_none')}
+                    ? `${imageFiles.length} photo${imageFiles.length > 1 ? 's' : ''} sélectionnée${imageFiles.length > 1 ? 's' : ''}`
+                    : 'Appuyer pour ouvrir la galerie'}
                 </Text>
               </View>
               {hasImages ? (
@@ -455,11 +480,11 @@ export default function ImportExportScreen() {
             <TouchableOpacity style={styles.pickerRow} onPress={pickImgOnly}>
               <View style={styles.pickerIcon}><Text style={styles.pickerEmoji}>🖼️</Text></View>
               <View style={styles.pickerInfo}>
-                <Text style={styles.pickerLabel}>{t('import_export_import_pick_images')}</Text>
+                <Text style={styles.pickerLabel}>Photos produits (galerie)</Text>
                 <Text style={[styles.pickerValue, !imgOnlyFiles.length && styles.pickerValueEmpty]} numberOfLines={1}>
                   {imgOnlyFiles.length
-                    ? t('import_export_import_images_count', { count: String(imgOnlyFiles.length) })
-                    : t('import_export_import_images_none')}
+                    ? `${imgOnlyFiles.length} photo${imgOnlyFiles.length > 1 ? 's' : ''} sélectionnée${imgOnlyFiles.length > 1 ? 's' : ''}`
+                    : 'Appuyer pour ouvrir la galerie'}
                 </Text>
               </View>
               {imgOnlyFiles.length ? (

@@ -7,6 +7,10 @@ import { Product } from './product.entity';
 import { SearchService } from '../search/search.service';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { TaxonomyType } from '../taxonomy/taxonomy.entity';
+import { HierarchyService } from '../hierarchy/hierarchy.service';
+import { REDIS_CLIENT } from '../search/cache.module';
+
+const CATALOGUE_TTL = 300; // 5 min
 
 @Injectable()
 export class ProductService {
@@ -18,9 +22,62 @@ export class ProductService {
     @InjectQueue('embedding') private embeddingQueue: Queue,
     @Inject(forwardRef(() => SearchService)) private searchService: SearchService,
     private taxonomyService: TaxonomyService,
+    private hierarchyService: HierarchyService,
+    @Inject(REDIS_CLIENT) private redis: any,
   ) {}
 
-  findAll(page = 1, limit = 20, search?: string, family?: string, subcategory?: string, category?: string) {
+  /** Look up the CategoryEntity id matching the given category/subcategory/family strings. */
+  private async resolveCategoryId(
+    category?: string,
+    subcategory?: string,
+    family?: string,
+  ): Promise<string | null> {
+    if (!category?.trim()) return null;
+    try {
+      const cats = await this.hierarchyService.listCategories();
+      const match = cats.find((c) => {
+        const nameMatch = c.name.toLowerCase() === category.trim().toLowerCase();
+        const sfMatch = !subcategory?.trim() || c.subFamilyName?.toLowerCase() === subcategory.trim().toLowerCase();
+        const famMatch = !family?.trim() || c.familyName?.toLowerCase() === family.trim().toLowerCase();
+        return nameMatch && sfMatch && famMatch;
+      });
+      return match?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Resolve relative image paths to absolute URLs using IMAGE_BASE_URL env var. */
+  private resolveImageUrls(images: string[]): string[] {
+    if (!images || images.length === 0) return images;
+    const base = (process.env.IMAGE_BASE_URL ?? 'https://productsearch-api.onrender.com').replace(/\/$/, '');
+    return images.map((img) => {
+      if (!img) return img;
+      if (img.startsWith('http')) return img;
+      // Strip leading slash before prepending base
+      const path = img.startsWith('/') ? img.slice(1) : img;
+      return `${base}/${path}`;
+    });
+  }
+
+  private resolveProductImages<T extends { images?: string[] | null }>(product: T): T {
+    if (product && product.images) {
+      product.images = this.resolveImageUrls(product.images);
+    }
+    return product;
+  }
+
+  async findAll(page = 1, limit = 20, search?: string, family?: string, subcategory?: string, category?: string) {
+    // Redis cache for unfiltered pages (search/filter queries are not cached)
+    const isFiltered = !!(search?.trim() || family?.trim() || subcategory?.trim() || category?.trim());
+    const cacheKey = `catalogue:page:${page}:${limit}`;
+    if (!isFiltered) {
+      try {
+        const cached = await this.redis.get(cacheKey);
+        if (cached) return JSON.parse(cached) as [Product[], number];
+      } catch { /* ignore cache errors */ }
+    }
+
     const qb = this.repo.createQueryBuilder('p')
       .orderBy('p.createdAt', 'DESC')
       .skip((page - 1) * limit)
@@ -53,7 +110,14 @@ export class ProductService {
       qb.where(conditions.join(' AND '), params);
     }
 
-    return qb.getManyAndCount();
+    const [products, count] = await qb.getManyAndCount();
+    const result = [products.map((p) => this.resolveProductImages(p)), count] as [Product[], number];
+
+    // Cache unfiltered pages
+    if (!isFiltered) {
+      this.redis.setex(cacheKey, CATALOGUE_TTL, JSON.stringify(result)).catch(() => {});
+    }
+    return result;
   }
 
   async getDistinctValues(field: 'category' | 'family' | 'subcategory'): Promise<string[]> {
@@ -81,12 +145,14 @@ export class ProductService {
     this.distinctCache.clear();
   }
 
-  findById(id: string) {
-    return this.repo.findOne({ where: { id } });
+  async findById(id: string) {
+    const product = await this.repo.findOne({ where: { id } });
+    return product ? this.resolveProductImages(product) : null;
   }
 
-  findByBarcode(barcode: string) {
-    return this.repo.findOne({ where: { barcode } });
+  async findByBarcode(barcode: string) {
+    const product = await this.repo.findOne({ where: { barcode } });
+    return product ? this.resolveProductImages(product) : null;
   }
 
   /**
@@ -114,17 +180,34 @@ export class ProductService {
     );
   }
 
+  private async invalidateCatalogueCache(): Promise<void> {
+    try {
+      const keys = await this.redis.keys('catalogue:*');
+      if (keys.length > 0) await this.redis.del(...keys);
+    } catch { /* ignore */ }
+  }
+
   async create(data: Partial<Product>) {
-    const product = this.repo.create(data);
+    const categoryId = await this.resolveCategoryId(data.category, data.subcategory, data.family);
+    const product = this.repo.create({ ...data, ...(categoryId ? { categoryId } : {}) });
     const saved = await this.repo.save(product);
     await this.embeddingQueue.add('generate', { productId: saved.id });
     this.invalidateDistinctCache();
+    await this.invalidateCatalogueCache();
     return saved;
   }
 
   async update(id: string, data: Partial<Product>) {
     const product = await this.findById(id);
     if (!product) throw new NotFoundException('Product not found');
+    if (data.category !== undefined || data.subcategory !== undefined || data.family !== undefined) {
+      const categoryId = await this.resolveCategoryId(
+        data.category ?? product.category,
+        data.subcategory ?? product.subcategory,
+        data.family ?? product.family,
+      );
+      if (categoryId !== null) data = { ...data, categoryId };
+    }
     Object.assign(product, data);
     const saved = await this.repo.save(product);
     if (data.name || data.description || data.images) {
@@ -161,7 +244,20 @@ export class ProductService {
 
   /** Upsert by codeGold: update if exists, create if not. Returns all affected rows. */
   async bulkUpsert(products: Partial<Product>[]): Promise<Array<{ id: string; codeGold: string | null; name: string }>> {
-    const codeGolds = products.map((p) => p.codeGold).filter(Boolean) as string[];
+    // Resolve any relative image paths to absolute URLs before persisting
+    const resolvedProducts = products.map((p) =>
+      p.images ? { ...p, images: this.resolveImageUrls(p.images) } : p,
+    );
+
+    // Resolve categoryId for each product
+    const withCategoryIds = await Promise.all(
+      resolvedProducts.map(async (p) => {
+        const categoryId = await this.resolveCategoryId(p.category, p.subcategory, p.family);
+        return categoryId ? { ...p, categoryId } : p;
+      }),
+    );
+
+    const codeGolds = withCategoryIds.map((p) => p.codeGold).filter(Boolean) as string[];
     const existing = codeGolds.length > 0
       ? await this.repo.find({ where: { codeGold: In(codeGolds) }, select: ['id', 'codeGold'] })
       : [];
@@ -170,7 +266,7 @@ export class ProductService {
     const toCreate: Partial<Product>[] = [];
     const toUpdate: Array<{ id: string; data: Partial<Product> }> = [];
 
-    for (const p of products) {
+    for (const p of withCategoryIds) {
       const existingId = p.codeGold ? existingByCode.get(p.codeGold) : undefined;
       if (existingId) {
         toUpdate.push({ id: existingId, data: p });

@@ -242,6 +242,7 @@ export class SearchService {
                   COALESCE(p.barcode,'') || ' ' || COALESCE(p."codeGold",'')
                 ) @@ websearch_to_tsquery('simple', $1)
                 OR lower(p.name) LIKE '%' || lower($1) || '%'
+                OR lower(COALESCE(p.brand,'')) LIKE '%' || lower($1) || '%'
                 OR lower(COALESCE(p.category,'')) LIKE '%' || lower($1) || '%'
                 OR lower(COALESCE(p.family,'')) LIKE '%' || lower($1) || '%'
                 OR lower(COALESCE(p.subcategory,'')) LIKE '%' || lower($1) || '%'
@@ -505,6 +506,17 @@ export class SearchService {
     matchedBy: MatchMethod[],
     debug?: SearchResult['debug'],
   ): SearchResult {
+    const imageBase = (process.env.IMAGE_BASE_URL ?? 'https://productsearch-api.onrender.com').replace(/\/$/, '');
+    const resolveImages = (images: string[]): string[] => {
+      if (!images || images.length === 0) return images ?? [];
+      return images.map((img) => {
+        if (!img) return img;
+        if (img.startsWith('http')) return img;
+        const p = img.startsWith('/') ? img.slice(1) : img;
+        return `${imageBase}/${p}`;
+      });
+    };
+
     return {
       id:            product.id,
       name:          product.name,
@@ -514,7 +526,7 @@ export class SearchService {
       category:      product.category      ?? null,
       subcategory:   product.subcategory   ?? null,
       family:        product.family        ?? null,
-      images:        product.images        ?? [],
+      images:        resolveImages(product.images ?? []),
       score:         Math.round(score * 10000) / 10000,
       matchedBy,
       debug,

@@ -23,7 +23,8 @@ export default function ProductDetailScreen({ route }: any) {
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState('');
   const [imgIndex, setImgIndex] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  // Start at 1 so content is always visible — animate from 0 only after product loads
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,13 +41,14 @@ export default function ProductDetailScreen({ route }: any) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Start fade-in only after the Animated.View is mounted (loading=false, product set)
+  // Fade-in when product loads
   useEffect(() => {
     if (product) {
       fadeAnim.setValue(0);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     }
-  }, [product]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product?.id]);
 
   const onImageScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);
@@ -62,13 +64,27 @@ export default function ProductDetailScreen({ route }: any) {
     );
   }
 
-  if (error || !product) {
+  if (error) {
     return (
       <SafeAreaView style={styles.center} edges={['bottom']}>
         <EmptyState
           icon="⚠️"
           title={t('product_error_title')}
-          subtitle={error || t('product_error_sub')}
+          subtitle={error}
+          actionLabel={t('product_retry')}
+          onAction={load}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (!product) {
+    return (
+      <SafeAreaView style={styles.center} edges={['bottom']}>
+        <EmptyState
+          icon="📭"
+          title="Produit introuvable"
+          subtitle="Ce produit n'existe pas ou a été supprimé."
           actionLabel={t('product_retry')}
           onAction={load}
         />

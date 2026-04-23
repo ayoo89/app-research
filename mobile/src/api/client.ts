@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 const DEV_URL = 'https://productsearch-api.onrender.com/api/v1';
 export const BASE_URL: string = (process.env.EXPO_PUBLIC_API_URL as string) ?? DEV_URL;
+export const IMAGE_BASE_URL: string = BASE_URL.replace('/api/v1', '');
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,

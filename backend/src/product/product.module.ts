@@ -8,6 +8,7 @@ import { EmbeddingProcessor } from './embedding.processor';
 import { EmbeddingService } from './embedding.service';
 import { SearchModule } from '../search/search.module';
 import { TaxonomyModule } from '../taxonomy/taxonomy.module';
+import { HierarchyModule } from '../hierarchy/hierarchy.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { TaxonomyModule } from '../taxonomy/taxonomy.module';
     BullModule.registerQueue({ name: 'embedding' }),
     forwardRef(() => SearchModule),
     TaxonomyModule,
+    HierarchyModule,
   ],
   providers: [ProductService, EmbeddingService, EmbeddingProcessor],
   controllers: [ProductController],

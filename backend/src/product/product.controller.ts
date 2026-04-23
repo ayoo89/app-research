@@ -23,6 +23,7 @@ class CreateProductDto {
   @IsOptional() @IsString() category?: string;
   @IsOptional() @IsString() subcategory?: string;
   @IsOptional() @IsString() family?: string;
+  @IsOptional() @IsString() categoryId?: string;
   @IsOptional() @IsArray() images?: string[];
 }
 

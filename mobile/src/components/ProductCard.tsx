@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import HighlightText from './HighlightText';
@@ -13,6 +13,8 @@ interface Props {
 }
 
 function ProductCard({ item, query, onPress }: Props) {
+  const [imgError, setImgError] = useState(false);
+
   return (
     <TouchableOpacity
       style={[styles.card, shadow.sm]}
@@ -21,13 +23,14 @@ function ProductCard({ item, query, onPress }: Props) {
       accessibilityRole="button"
       accessibilityLabel={`${item.name}${item.brand ? `, ${item.brand}` : ''}`}
     >
-      {item.images?.[0] ? (
+      {item.images?.[0] && !imgError ? (
         <Image
           source={{ uri: item.images[0] }}
           style={styles.thumb}
           contentFit="cover"
           priority="normal"
           transition={200}
+          onError={() => setImgError(true)}
         />
       ) : (
         <View style={[styles.thumb, styles.thumbPlaceholder]}>
