@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Product } from '../product/product.entity';
 import { EmbeddingService } from '../product/embedding.service';
+import { REDIS_CLIENT } from '../search/cache.module';
 
 // Bump this when the embedding model changes — triggers automatic re-indexing
 export const EMBEDDING_VERSION = 4; // v4: switched to CLIP text embeddings for image search compatibility
@@ -17,6 +18,7 @@ export class ReindexService {
     @InjectRepository(Product) private productRepo: Repository<Product>,
     @InjectQueue('embedding') private embeddingQueue: Queue,
     private embeddingService: EmbeddingService,
+    @Inject(REDIS_CLIENT) private redis: any,
   ) {}
 
   /**
@@ -54,6 +56,8 @@ export class ReindexService {
     }
 
     this.logger.log(`Full reindex complete: ${queued} products queued`);
+    // Record timestamp for dashboard
+    this.redis.set('reindex:last_full_at', new Date().toISOString()).catch(() => {});
     return { queued };
   }
 

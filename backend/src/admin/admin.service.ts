@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException, HttpException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException, HttpException, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { ProductService } from '../product/product.service';
@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as XLSX from 'xlsx';
 import { mapCsvRowToProduct } from './csv-row.mapper';
 import { SUPER_ADMIN_EMAIL } from '../auth/super-admin.constants';
+import { REDIS_CLIENT } from '../search/cache.module';
 
 export interface ImageUploadDetail {
   filename: string;
@@ -37,6 +38,7 @@ export class AdminService {
     private productService: ProductService,
     private taxonomyService: TaxonomyService,
     private config: ConfigService,
+    @Inject(REDIS_CLIENT) private redis: any,
   ) {}
 
   // ── User Management ──────────────────────────────────────────────
@@ -341,6 +343,15 @@ export class AdminService {
       ...upserted.map((p) => ({ name: p.name, codeGold: p.codeGold ?? null, success: true })),
       ...errors.map((e) => ({ name: '—', success: false, reason: e })),
     ];
+
+    // Track import stats in Redis for dashboard
+    const successRate = products.length > 0 ? upserted.length / products.length : 0;
+    this.redis.hset('import:last',
+      'totalImported', String(upserted.length),
+      'lastImportAt', new Date().toISOString(),
+      'lastImportRows', String(products.length),
+      'lastImportSuccessRate', String(successRate),
+    ).catch(() => {});
 
     return { imported: products.length, imagesUploaded: uploaded, imagesMatched: matched, errors, imageResults, productResults };
   }
